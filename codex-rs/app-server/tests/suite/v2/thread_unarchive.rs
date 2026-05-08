@@ -213,6 +213,7 @@ async fn thread_unarchive_preserves_pathless_store_metadata() -> Result<()> {
         .create_thread(CreateThreadParams {
             session_id: thread_id.into(),
             thread_id,
+            wire_session_id: thread_id,
             extra_config: None,
             forked_from_id: Some(parent_thread_id),
             parent_thread_id: None,

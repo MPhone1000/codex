@@ -88,6 +88,7 @@ async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
         meta: SessionMeta {
             session_id: thread_id.into(),
             id: thread_id,
+            wire_session_id: None,
             forked_from_id: None,
             parent_thread_id: None,
             timestamp: "2026-01-27T12:34:56Z".to_string(),

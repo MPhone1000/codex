@@ -87,6 +87,8 @@ pub(crate) struct SessionConfiguration {
     pub(super) codex_home: AbsolutePathBuf,
     /// Optional user-facing name for the thread, updated during the session.
     pub(super) thread_name: Option<String>,
+    /// Session identity propagated to provider requests and persisted across resumes and forks.
+    pub(super) wire_session_id: Option<ThreadId>,
 
     // TODO(pakrym): Remove config from here
     pub(super) original_config_do_not_use: Arc<Config>,
@@ -470,6 +472,14 @@ impl Session {
         self.services.agent_control.session_id()
     }
 
+    pub(crate) async fn wire_session_id(&self) -> ThreadId {
+        let state = self.state.lock().await;
+        state
+            .session_configuration
+            .wire_session_id
+            .unwrap_or(self.thread_id)
+    }
+
     pub(crate) async fn originator(&self) -> String {
         let state = self.state.lock().await;
         state.session_configuration.originator.clone()
@@ -528,6 +538,8 @@ impl Session {
             }
             InitialHistory::Resumed(resumed_history) => resumed_history.conversation_id,
         };
+        let wire_session_id = session_configuration.wire_session_id.unwrap_or(thread_id);
+        session_configuration.wire_session_id = Some(wire_session_id);
         let resumed_session_id = match &initial_history {
             InitialHistory::Resumed(resumed) => {
                 resumed.history.iter().find_map(|item| match item {
@@ -590,6 +602,7 @@ impl Session {
                         let params = CreateThreadParams {
                             session_id,
                             thread_id,
+                            wire_session_id,
                             extra_config: config.extra_config.clone(),
                             forked_from_id,
                             parent_thread_id,

@@ -121,6 +121,7 @@ mod tests {
                 .create_thread(CreateThreadParams {
                     session_id: thread_id.into(),
                     thread_id,
+                    wire_session_id: thread_id,
                     extra_config: None,
                     forked_from_id: None,
                     parent_thread_id,
@@ -316,6 +317,7 @@ mod tests {
         CreateThreadParams {
             session_id: thread_id.into(),
             thread_id,
+            wire_session_id: thread_id,
             extra_config: None,
             forked_from_id: None,
             parent_thread_id: None,
@@ -426,6 +428,7 @@ impl InMemoryThreadStore {
         let session_meta = SessionMeta {
             session_id: params.session_id,
             id: params.thread_id,
+            wire_session_id: Some(params.wire_session_id),
             forked_from_id: params.forked_from_id,
             parent_thread_id: params.parent_thread_id,
             cwd: params.metadata.cwd.clone().unwrap_or_default(),
