@@ -23,8 +23,8 @@ class InstallShTest(unittest.TestCase):
         self.assertEqual(
             requests,
             [
-                "https://api.github.com/repos/openai/codex/releases/tags/"
-                f"rust-v{VERSION}"
+                "https://api.github.com/repos/MPhone1000/codex/releases/tags/"
+                f"internal-rust-v{VERSION}"
             ],
         )
         self.assertIn(
@@ -40,10 +40,10 @@ class InstallShTest(unittest.TestCase):
         self.assertEqual(
             requests,
             [
-                "https://api.github.com/repos/openai/codex/releases/tags/"
-                f"rust-v{VERSION}",
-                "https://github.com/openai/codex/releases/download/"
-                f"rust-v{VERSION}/codex-package_SHA256SUMS",
+                "https://api.github.com/repos/MPhone1000/codex/releases/tags/"
+                f"internal-rust-v{VERSION}",
+                "https://github.com/MPhone1000/codex/releases/download/"
+                f"internal-rust-v{VERSION}/codex-package_SHA256SUMS",
             ],
         )
         self.assertIn(f"Resolved version: {VERSION}", result.stdout)
@@ -55,9 +55,9 @@ class InstallShTest(unittest.TestCase):
         self.assertEqual(
             requests,
             [
-                "https://api.github.com/repos/openai/codex/releases/latest",
-                "https://github.com/openai/codex/releases/download/"
-                f"rust-v{VERSION}/codex-package_SHA256SUMS",
+                "https://api.github.com/repos/MPhone1000/codex/releases/latest",
+                "https://github.com/MPhone1000/codex/releases/download/"
+                f"internal-rust-v{VERSION}/codex-package_SHA256SUMS",
             ],
         )
         self.assertIn(f"Resolved version: {VERSION}", result.stdout)
@@ -71,9 +71,9 @@ class InstallShTest(unittest.TestCase):
         self.assertEqual(
             requests,
             [
-                "https://api.github.com/repos/openai/codex/releases/latest",
-                "https://github.com/openai/codex/releases/download/"
-                f"rust-v{VERSION}/codex-package_SHA256SUMS",
+                "https://api.github.com/repos/MPhone1000/codex/releases/latest",
+                "https://github.com/MPhone1000/codex/releases/download/"
+                f"internal-rust-v{VERSION}/codex-package_SHA256SUMS",
             ],
         )
         self.assertIn(f"Resolved version: {VERSION}", result.stdout)
@@ -212,6 +212,7 @@ def run_installer_in(
         {
             "CODEX_HOME": str(root / "codex-home"),
             "CODEX_INSTALL_DIR": str(root / "install-bin"),
+            "CODEX_INSTALL_SKIP_INTERNAL_PROFILE": "1",
             "CODEX_NON_INTERACTIVE": "1",
             "CODEX_RELEASE": release,
             "CODEX_TEST_ARCHIVE_PATH": str(archive_path or ""),
@@ -275,7 +276,7 @@ def create_package_release(root: Path) -> tuple[Path, Path, str]:
                     "digest": f"sha256:{checksum_digest}",
                 },
             ],
-            "tag_name": f"rust-v{VERSION}",
+            "tag_name": f"internal-rust-v{VERSION}",
         },
         indent=2,
     )
@@ -310,7 +311,11 @@ def release_metadata(*, compact: bool = False, reorder: bool = False) -> str:
     )
     separators = (",", ":") if compact else None
     return json.dumps(
-        {"assets": assets, "body": "braces: { } [ ]", "tag_name": f"rust-v{VERSION}"},
+        {
+            "assets": assets,
+            "body": "braces: { } [ ]",
+            "tag_name": f"internal-rust-v{VERSION}",
+        },
         indent=None if compact else 2,
         separators=separators,
     )
@@ -341,7 +346,7 @@ def legacy_release_metadata_with_decoys() -> str:
                 f'fake: {{"name":"codex-package_SHA256SUMS","digest":"{fake_digest}"}}'
             ),
             "assets": assets,
-            "tag_name": f"rust-v{VERSION}",
+            "tag_name": f"internal-rust-v{VERSION}",
         },
         separators=(",", ":"),
     )

@@ -12,6 +12,14 @@ if ([string]::IsNullOrWhiteSpace($Release)) {
 }
 
 $NonInteractive = $env:CODEX_NON_INTERACTIVE -match "^(?i:1|true|yes)$"
+$Repository = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_REPOSITORY)) { "MPhone1000/codex" } else { $env:CODEX_INSTALL_REPOSITORY }
+$ReleaseTagPrefix = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_RELEASE_TAG_PREFIX)) { "internal-rust-v" } else { $env:CODEX_INSTALL_RELEASE_TAG_PREFIX }
+$ReleaseTagOverride = $env:CODEX_INSTALL_RELEASE_TAG
+$LatestReleaseUrl = if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_LATEST_RELEASE_URL)) { "https://api.github.com/repos/$Repository/releases/latest" } else { $env:CODEX_INSTALL_LATEST_RELEASE_URL }
+$InstallAk = $env:CODEX_INSTALL_AK
+$InstallAzureBaseUrl = $env:CODEX_INSTALL_AZURE_BASE_URL
+$InstallModel = $env:CODEX_INSTALL_MODEL
+$SkipInternalProfile = $env:CODEX_INSTALL_SKIP_INTERNAL_PROFILE -match "^(?i:1|true|yes)$"
 
 function Write-Step {
     param(
@@ -53,6 +61,10 @@ function Normalize-Version {
 
     if ([string]::IsNullOrWhiteSpace($RawVersion) -or $RawVersion -eq "latest") {
         return "latest"
+    }
+
+    if ($RawVersion.StartsWith($ReleaseTagPrefix)) {
+        return $RawVersion.Substring($ReleaseTagPrefix.Length)
     }
 
     if ($RawVersion.StartsWith("rust-v")) {
@@ -201,17 +213,94 @@ function Remove-StaleInstallArtifacts {
     }
 }
 
+function Invoke-InternalProfileBootstrap {
+    param(
+        [string]$CodexCommand
+    )
+
+    $arguments = @(
+        "debug",
+        "bootstrap-internal-profile",
+        "--ak-stdin",
+        "--azure-base-url",
+        $script:InstallAzureBaseUrl
+    )
+    if (-not [string]::IsNullOrWhiteSpace($script:InstallModel)) {
+        $arguments += @("--model", $script:InstallModel)
+    }
+
+    $script:InstallAk | & $CodexCommand @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Internal profile bootstrap exited with code $LASTEXITCODE."
+    }
+}
+
+function Configure-InternalProfile {
+    param(
+        [string]$CodexCommand,
+        [string]$CodexHome
+    )
+
+    if ($SkipInternalProfile) {
+        Write-Step "Skipping internal profile bootstrap"
+        return
+    }
+
+    $profilePath = Join-Path $CodexHome "internal.config.toml"
+    $hasInternalProfile = Test-Path -LiteralPath $profilePath -PathType Leaf
+    $hasOverrides = -not [string]::IsNullOrWhiteSpace($script:InstallAk) -or
+        -not [string]::IsNullOrWhiteSpace($script:InstallAzureBaseUrl) -or
+        -not [string]::IsNullOrWhiteSpace($script:InstallModel)
+    if ($hasInternalProfile -and -not $hasOverrides) {
+        Write-Step "Skipping internal profile bootstrap"
+        return
+    }
+
+    if (-not $hasInternalProfile -and
+        ([string]::IsNullOrWhiteSpace($script:InstallAk) -or [string]::IsNullOrWhiteSpace($script:InstallAzureBaseUrl))) {
+        if ($NonInteractive) {
+            throw "A new internal profile requires CODEX_INSTALL_AK and CODEX_INSTALL_AZURE_BASE_URL."
+        }
+        if ([string]::IsNullOrWhiteSpace($script:InstallAzureBaseUrl)) {
+            $script:InstallAzureBaseUrl = Read-Host "Enter the internal Azure base URL"
+        }
+        if ([string]::IsNullOrWhiteSpace($script:InstallAk)) {
+            $secureAk = Read-Host "Enter ak for the internal Azure provider" -AsSecureString
+            $akPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureAk)
+            try {
+                $script:InstallAk = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($akPointer)
+            } finally {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($akPointer)
+            }
+        }
+    }
+
+    Write-Step "Configuring internal profile"
+    try {
+        Invoke-InternalProfileBootstrap -CodexCommand $CodexCommand
+    } catch {
+        Write-WarningStep "Internal profile bootstrap failed; retrying once. $($_.Exception.Message)"
+        try {
+            Invoke-InternalProfileBootstrap -CodexCommand $CodexCommand
+        } catch {
+            Write-WarningStep "Codex is installed, but internal profile setup did not complete. $($_.Exception.Message)"
+            Write-WarningStep "Retry with: `$env:CODEX_INSTALL_AK | & '$CodexCommand' debug bootstrap-internal-profile --ak-stdin --azure-base-url '$script:InstallAzureBaseUrl'"
+        }
+    }
+}
+
 function Resolve-Release {
     $normalizedVersion = Normalize-Version -RawVersion $Release
     Assert-ValidReleaseVersion -Version $normalizedVersion
 
     if ($normalizedVersion -eq "latest") {
         $requestedRelease = "latest"
-        $metadataUri = "https://api.github.com/repos/openai/codex/releases/latest"
+        $metadataUri = $LatestReleaseUrl
     } else {
         $resolvedVersion = $normalizedVersion
         $requestedRelease = $resolvedVersion
-        $metadataUri = "https://api.github.com/repos/openai/codex/releases/tags/rust-v$resolvedVersion"
+        $releaseTag = if ([string]::IsNullOrWhiteSpace($ReleaseTagOverride)) { "$ReleaseTagPrefix$resolvedVersion" } else { $ReleaseTagOverride }
+        $metadataUri = "https://api.github.com/repos/$Repository/releases/tags/$releaseTag"
     }
 
     try {
@@ -922,6 +1011,7 @@ Write-Step "Future PowerShell windows: open a new PowerShell window and run: cod
 Write-Host "Codex CLI $resolvedVersion installed successfully."
 
 $codexCommand = Join-Path $visibleBinDir "codex.exe"
+Configure-InternalProfile -CodexCommand $codexCommand -CodexHome $codexHome
 if (Prompt-YesNo "Start Codex now?") {
     Write-Step "Launching Codex"
     & $codexCommand

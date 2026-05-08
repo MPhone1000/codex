@@ -4,6 +4,16 @@ set -eu
 
 RELEASE="${CODEX_RELEASE:-latest}"
 NON_INTERACTIVE="${CODEX_NON_INTERACTIVE:-false}"
+REPOSITORY="${CODEX_INSTALL_REPOSITORY:-MPhone1000/codex}"
+RELEASE_TAG_PREFIX="${CODEX_INSTALL_RELEASE_TAG_PREFIX:-internal-rust-v}"
+RELEASE_TAG_OVERRIDE="${CODEX_INSTALL_RELEASE_TAG:-}"
+RELEASE_BASE_URL="${CODEX_INSTALL_RELEASE_BASE_URL:-https://github.com/$REPOSITORY/releases/download}"
+LATEST_RELEASE_URL="${CODEX_INSTALL_LATEST_RELEASE_URL:-https://api.github.com/repos/$REPOSITORY/releases/latest}"
+INSTALL_AK="${CODEX_INSTALL_AK:-}"
+INSTALL_AZURE_BASE_URL="${CODEX_INSTALL_AZURE_BASE_URL:-}"
+INSTALL_MODEL="${CODEX_INSTALL_MODEL:-}"
+SKIP_INTERNAL_PROFILE="${CODEX_INSTALL_SKIP_INTERNAL_PROFILE:-false}"
+SHOULD_BOOTSTRAP_INTERNAL_PROFILE="true"
 
 BIN_DIR="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
 BIN_PATH="$BIN_DIR/codex"
@@ -35,6 +45,9 @@ normalize_version() {
   case "$1" in
     "" | latest)
       printf 'latest\n'
+      ;;
+    "$RELEASE_TAG_PREFIX"*)
+      printf '%s\n' "${1#"$RELEASE_TAG_PREFIX"}"
       ;;
     rust-v*)
       printf '%s\n' "${1#rust-v}"
@@ -77,8 +90,13 @@ parse_args() {
 Usage: install.sh [--release VERSION]
 
 Environment:
-  CODEX_RELEASE          Version to install; overridden by --release.
-  CODEX_NON_INTERACTIVE  Set to 1, true, or yes to skip prompts.
+  CODEX_RELEASE                       Version to install; overridden by --release.
+  CODEX_NON_INTERACTIVE               Set to 1, true, or yes to skip prompts.
+  CODEX_INSTALL_REPOSITORY            GitHub repository containing internal releases.
+  CODEX_INSTALL_AK                    Internal Azure provider credential.
+  CODEX_INSTALL_AZURE_BASE_URL        Internal Azure provider base URL.
+  CODEX_INSTALL_MODEL                 Optional internal model override.
+  CODEX_INSTALL_SKIP_INTERNAL_PROFILE Skip internal profile setup when true.
 EOF
         exit 0
         ;;
@@ -237,13 +255,15 @@ release_url_for_asset() {
   asset="$1"
   resolved_version="$2"
 
-  printf 'https://github.com/openai/codex/releases/download/rust-v%s/%s\n' "$resolved_version" "$asset"
+  release_tag="${RELEASE_TAG_OVERRIDE:-${RELEASE_TAG_PREFIX}${resolved_version}}"
+  printf '%s/%s/%s\n' "${RELEASE_BASE_URL%/}" "$release_tag" "$asset"
 }
 
 release_metadata_url() {
   resolved_version="$1"
 
-  printf 'https://api.github.com/repos/openai/codex/releases/tags/rust-v%s\n' "$resolved_version"
+  release_tag="${RELEASE_TAG_OVERRIDE:-${RELEASE_TAG_PREFIX}${resolved_version}}"
+  printf 'https://api.github.com/repos/%s/releases/tags/%s\n' "$REPOSITORY" "$release_tag"
 }
 
 resolve_release() {
@@ -252,7 +272,7 @@ resolve_release() {
 
   if [ "$normalized_version" = "latest" ]; then
     requested_release="latest"
-    metadata_url="https://api.github.com/repos/openai/codex/releases/latest"
+    metadata_url="$LATEST_RELEASE_URL"
   else
     resolved_version="$normalized_version"
     requested_release="$resolved_version"
@@ -271,10 +291,7 @@ resolve_release() {
 
   if [ "$normalized_version" = "latest" ]; then
     release_tag="$(printf '%s\n' "$release_metadata" | awk -F '\t' '$1 == "tag_name" { print $2; exit }')"
-    case "$release_tag" in
-      rust-v*) resolved_version="${release_tag#rust-v}" ;;
-      *) resolved_version="" ;;
-    esac
+    resolved_version="$(normalize_version "$release_tag")"
     if [ -z "$resolved_version" ]; then
       echo "Failed to resolve the latest Codex release version." >&2
       exit 1
@@ -889,7 +906,93 @@ verify_visible_command() {
   fi
 }
 
+prepare_internal_profile_bootstrap() {
+  case "$SKIP_INTERNAL_PROFILE" in
+    1 | true | TRUE | yes | YES)
+      SHOULD_BOOTSTRAP_INTERNAL_PROFILE="false"
+      return
+      ;;
+  esac
+
+  profile_path="$CODEX_HOME_DIR/internal.config.toml"
+  has_internal_profile="false"
+  if [ -f "$profile_path" ]; then
+    has_internal_profile="true"
+  fi
+
+  if [ "$has_internal_profile" = "true" ] &&
+    [ -z "$INSTALL_AK" ] &&
+    [ -z "$INSTALL_AZURE_BASE_URL" ] &&
+    [ -z "$INSTALL_MODEL" ]; then
+    SHOULD_BOOTSTRAP_INTERNAL_PROFILE="false"
+    return
+  fi
+
+  if [ -n "$INSTALL_AK" ] && [ -n "$INSTALL_AZURE_BASE_URL" ]; then
+    return
+  fi
+
+  if [ "$has_internal_profile" = "true" ]; then
+    return
+  fi
+
+  case "$NON_INTERACTIVE" in
+    1 | true | TRUE | yes | YES)
+      echo "A new internal profile requires CODEX_INSTALL_AK and CODEX_INSTALL_AZURE_BASE_URL." >&2
+      exit 1
+      ;;
+  esac
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo "A new internal profile requires CODEX_INSTALL_AK and CODEX_INSTALL_AZURE_BASE_URL." >&2
+    exit 1
+  fi
+
+  if [ -z "$INSTALL_AZURE_BASE_URL" ]; then
+    printf 'Enter the internal Azure base URL: ' >/dev/tty
+    IFS= read -r INSTALL_AZURE_BASE_URL </dev/tty || true
+  fi
+  if [ -z "$INSTALL_AK" ]; then
+    old_stty=""
+    if command -v stty >/dev/null 2>&1; then
+      old_stty="$(stty -g </dev/tty 2>/dev/null || true)"
+      stty -echo </dev/tty 2>/dev/null || true
+    fi
+    printf 'Enter ak for the internal Azure provider: ' >/dev/tty
+    IFS= read -r INSTALL_AK </dev/tty || true
+    if [ -n "$old_stty" ]; then
+      stty "$old_stty" </dev/tty 2>/dev/null || true
+    fi
+    printf '\n' >/dev/tty
+  fi
+
+  if [ -z "$INSTALL_AK" ] || [ -z "$INSTALL_AZURE_BASE_URL" ]; then
+    echo "A non-empty Azure base URL and ak are required to configure the internal profile." >&2
+    exit 1
+  fi
+}
+
+run_internal_profile_bootstrap() {
+  if [ -n "$INSTALL_MODEL" ]; then
+    printf '%s\n' "$INSTALL_AK" | "$BIN_PATH" debug bootstrap-internal-profile \
+      --ak-stdin --azure-base-url "$INSTALL_AZURE_BASE_URL" --model "$INSTALL_MODEL"
+  else
+    printf '%s\n' "$INSTALL_AK" | "$BIN_PATH" debug bootstrap-internal-profile \
+      --ak-stdin --azure-base-url "$INSTALL_AZURE_BASE_URL"
+  fi
+}
+
+print_manual_bootstrap_hint() {
+  echo "Codex is installed, but internal profile setup did not complete." >&2
+  echo "Retry with CODEX_INSTALL_AK set:" >&2
+  if [ -n "$INSTALL_MODEL" ]; then
+    echo "  printenv CODEX_INSTALL_AK | \"$BIN_PATH\" debug bootstrap-internal-profile --ak-stdin --azure-base-url \"$INSTALL_AZURE_BASE_URL\" --model \"$INSTALL_MODEL\"" >&2
+  else
+    echo "  printenv CODEX_INSTALL_AK | \"$BIN_PATH\" debug bootstrap-internal-profile --ak-stdin --azure-base-url \"$INSTALL_AZURE_BASE_URL\"" >&2
+  fi
+}
+
 parse_args "$@"
+prepare_internal_profile_bootstrap
 
 require_command mktemp
 require_command tar
@@ -1025,6 +1128,18 @@ add_to_path
 verify_visible_command
 release_install_lock
 handle_conflicting_install
+
+if [ "$SHOULD_BOOTSTRAP_INTERNAL_PROFILE" = "true" ]; then
+  step "Configuring internal profile"
+  if ! run_internal_profile_bootstrap; then
+    warn "Internal profile bootstrap failed; retrying once."
+    if ! run_internal_profile_bootstrap; then
+      print_manual_bootstrap_hint
+    fi
+  fi
+else
+  step "Skipping internal profile bootstrap"
+fi
 
 case "$path_action" in
   added)
