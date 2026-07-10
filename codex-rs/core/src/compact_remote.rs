@@ -428,6 +428,17 @@ fn should_keep_non_reasoning_compacted_history_item(item: &ResponseItem) -> bool
     }
 }
 
+/// Returns whether an existing history item may be retained by remote compaction v2.
+///
+/// Unlike compact endpoint output, this input history is already canonical, so assistant
+/// messages do not need the stateful encrypted-reasoning validation applied above.
+pub(crate) fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
+    match item {
+        ResponseItem::Message { role, .. } if role == "assistant" => true,
+        _ => should_keep_non_reasoning_compacted_history_item(item),
+    }
+}
+
 pub(crate) fn trim_function_call_history_to_fit_context_window(
     history: &mut ContextManager,
     turn_context: &TurnContext,

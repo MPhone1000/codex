@@ -170,22 +170,19 @@ fn missing_global_default_edits(existing: &TomlValue) -> Vec<ConfigEdit> {
     edits
 }
 
-fn resolve_ak<'a>(
-    input_ak: &'a str,
-    existing: &'a TomlValue,
-) -> anyhow::Result<&'a str> {
+fn resolve_ak<'a>(input_ak: &'a str, existing: &'a TomlValue) -> anyhow::Result<&'a str> {
     let input_ak = input_ak.trim();
     if !input_ak.is_empty() {
         return Ok(input_ak);
     }
 
     if let Some(existing_ak) = value_at_path(
-            existing,
-            &["model_providers", AZURE_PROVIDER_ID, "query_params", "ak"],
-        )
-        .and_then(TomlValue::as_str)
-        .map(str::trim)
-        .filter(|existing_ak| !existing_ak.is_empty())
+        existing,
+        &["model_providers", AZURE_PROVIDER_ID, "query_params", "ak"],
+    )
+    .and_then(TomlValue::as_str)
+    .map(str::trim)
+    .filter(|existing_ak| !existing_ak.is_empty())
     {
         return Ok(existing_ak);
     }
@@ -203,12 +200,12 @@ fn resolve_azure_base_url<'a>(
     }
 
     if let Some(existing_azure_base_url) = value_at_path(
-            existing,
-            &["model_providers", AZURE_PROVIDER_ID, "base_url"],
-        )
-        .and_then(TomlValue::as_str)
-        .map(str::trim)
-        .filter(|existing_azure_base_url| !existing_azure_base_url.is_empty())
+        existing,
+        &["model_providers", AZURE_PROVIDER_ID, "base_url"],
+    )
+    .and_then(TomlValue::as_str)
+    .map(str::trim)
+    .filter(|existing_azure_base_url| !existing_azure_base_url.is_empty())
     {
         return Ok(existing_azure_base_url);
     }
@@ -216,10 +213,7 @@ fn resolve_azure_base_url<'a>(
     anyhow::bail!("internal installer requires a non-empty azure base URL");
 }
 
-fn resolve_model<'a>(
-    input_model: Option<&'a str>,
-    existing: &'a TomlValue,
-) -> &'a str {
+fn resolve_model<'a>(input_model: Option<&'a str>, existing: &'a TomlValue) -> &'a str {
     if let Some(input_model) = input_model
         .map(str::trim)
         .filter(|input_model| !input_model.is_empty())
@@ -227,11 +221,10 @@ fn resolve_model<'a>(
         return input_model;
     }
 
-    if let Some(existing_model) =
-            value_at_path(existing, &["model"])
-                .and_then(TomlValue::as_str)
-                .map(str::trim)
-                .filter(|existing_model| !existing_model.is_empty())
+    if let Some(existing_model) = value_at_path(existing, &["model"])
+        .and_then(TomlValue::as_str)
+        .map(str::trim)
+        .filter(|existing_model| !existing_model.is_empty())
     {
         return existing_model;
     }

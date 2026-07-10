@@ -422,6 +422,7 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
         &config,
         RolloutRecorderParams::new(
             thread_id,
+            thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,
             SessionSource::Exec,
@@ -516,6 +517,7 @@ async fn persist_reports_filesystem_error_and_retries_buffered_items() -> std::i
     let recorder = RolloutRecorder::new(
         &config,
         RolloutRecorderParams::new(
+            thread_id,
             thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,

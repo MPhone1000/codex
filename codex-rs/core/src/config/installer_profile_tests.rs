@@ -18,15 +18,17 @@ fn bootstrap_internal_profile_creates_profile_v2_defaults() -> anyhow::Result<()
         TEST_AZURE_BASE_URL,
         Some(DEFAULT_INTERNAL_PROFILE_MODEL),
     )?;
-    assert_eq!(result.profile_path, codex_home.path().join(INTERNAL_PROFILE_FILE));
+    assert_eq!(
+        result.profile_path,
+        codex_home.path().join(INTERNAL_PROFILE_FILE)
+    );
 
     let global = read_toml_or_empty(&codex_home.path().join(CONFIG_TOML_FILE))?;
     let profile = read_toml_or_empty(&result.profile_path)?;
     assert_eq!(value_at_path(&global, &["profile"]), None);
     assert_eq!(value_at_path(&global, &["profiles"]), None);
     assert_eq!(
-        value_at_path(&global, &["features", "prevent_idle_sleep"])
-            .and_then(TomlValue::as_bool),
+        value_at_path(&global, &["features", "prevent_idle_sleep"]).and_then(TomlValue::as_bool),
         Some(true)
     );
     assert_eq!(
@@ -43,8 +45,11 @@ fn bootstrap_internal_profile_creates_profile_v2_defaults() -> anyhow::Result<()
         Some(TEST_AZURE_BASE_URL)
     );
     assert_eq!(
-        value_at_path(&profile, &["model_providers", "azure", "query_params", "ak"])
-            .and_then(TomlValue::as_str),
+        value_at_path(
+            &profile,
+            &["model_providers", "azure", "query_params", "ak"]
+        )
+        .and_then(TomlValue::as_str),
         Some("first-ak")
     );
 
@@ -52,8 +57,7 @@ fn bootstrap_internal_profile_creates_profile_v2_defaults() -> anyhow::Result<()
 }
 
 #[test]
-fn bootstrap_internal_profile_preserves_existing_global_and_profile_values()
--> anyhow::Result<()> {
+fn bootstrap_internal_profile_preserves_existing_global_and_profile_values() -> anyhow::Result<()> {
     let codex_home = TempDir::new()?;
     std::fs::write(
         codex_home.path().join(CONFIG_TOML_FILE),
@@ -88,8 +92,7 @@ ak = "existing-ak"
         Some("none")
     );
     assert_eq!(
-        value_at_path(&global, &["features", "multi_agent"])
-            .and_then(TomlValue::as_bool),
+        value_at_path(&global, &["features", "multi_agent"]).and_then(TomlValue::as_bool),
         Some(false)
     );
     assert_eq!(
@@ -97,8 +100,11 @@ ak = "existing-ak"
         Some("existing-model")
     );
     assert_eq!(
-        value_at_path(&profile, &["model_providers", "azure", "query_params", "ak"])
-            .and_then(TomlValue::as_str),
+        value_at_path(
+            &profile,
+            &["model_providers", "azure", "query_params", "ak"]
+        )
+        .and_then(TomlValue::as_str),
         Some("existing-ak")
     );
 

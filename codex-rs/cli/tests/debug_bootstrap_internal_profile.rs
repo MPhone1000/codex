@@ -58,8 +58,11 @@ async fn debug_bootstrap_internal_profile_creates_profile_v2_file() -> Result<()
         Some(TEST_AZURE_BASE_URL)
     );
     assert_eq!(
-        value_at_path(&profile, &["model_providers", "azure", "query_params", "ak"])
-            .and_then(TomlValue::as_str),
+        value_at_path(
+            &profile,
+            &["model_providers", "azure", "query_params", "ak"]
+        )
+        .and_then(TomlValue::as_str),
         Some("secret-ak")
     );
 
@@ -127,8 +130,11 @@ ak = "existing-ak"
         Some("existing-model")
     );
     assert_eq!(
-        value_at_path(&profile, &["model_providers", "azure", "query_params", "ak"])
-            .and_then(TomlValue::as_str),
+        value_at_path(
+            &profile,
+            &["model_providers", "azure", "query_params", "ak"]
+        )
+        .and_then(TomlValue::as_str),
         Some("existing-ak")
     );
 
