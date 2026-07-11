@@ -80,6 +80,10 @@ jobs:
         working-directory: codex-rs
     env:
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: ${{ contains(matrix.target, 'apple-darwin') && 'packed' || 'off' }}
+      # Use the git CLI instead of Cargo's libgit2 path for git dependencies.
+      # macOS runners can fail to fetch libwebrtc's nested libyuv submodule
+      # through SecureTransport/libgit2.
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     strategy:
       fail-fast: false
       matrix:
