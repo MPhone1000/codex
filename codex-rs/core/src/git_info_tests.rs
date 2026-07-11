@@ -602,6 +602,20 @@ async fn resolve_root_git_project_for_trust_returns_none_outside_repo() {
 }
 
 #[tokio::test]
+async fn resolve_root_git_project_for_trust_ignores_empty_dot_git_ancestor() {
+    let tmp = TempDir::new().expect("tempdir");
+    let nested = tmp.path().join("nested");
+    std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    std::fs::create_dir_all(&nested).unwrap();
+
+    assert!(
+        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &nested.abs())
+            .await
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn get_git_repo_root_with_fs_detects_gitdir_pointer() {
     let tmp = TempDir::new().expect("tempdir");
     let proj = tmp.path().join("proj");
@@ -621,6 +635,7 @@ async fn get_git_repo_root_with_fs_starts_at_parent_for_file() {
     let proj = tmp.path().join("proj");
     let nested = proj.join("nested");
     std::fs::create_dir_all(proj.join(".git")).unwrap();
+    std::fs::write(proj.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
     std::fs::create_dir_all(&nested).unwrap();
     let file = nested.join("file.txt");
     std::fs::write(&file, "contents").unwrap();
@@ -637,6 +652,7 @@ async fn get_git_repo_root_with_fs_ignores_metadata_errors() {
     let proj = tmp.path().join("proj");
     let nested = proj.join("nested");
     std::fs::create_dir_all(proj.join(".git")).unwrap();
+    std::fs::write(proj.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
     std::fs::create_dir_all(&nested).unwrap();
     let fs = FailingMetadataFileSystem {
         path: PathUri::from_abs_path(&nested.join(".git").abs()),
@@ -654,6 +670,7 @@ async fn get_git_repo_root_with_fs_supports_windows_namespace_paths() {
     let tmp = TempDir::new().expect("tempdir");
     let repo = tmp.path().join("repo");
     std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
     std::fs::create_dir_all(repo.join("nested")).unwrap();
 
     let namespace_repo = PathBuf::from(format!(r"\\?\{}", repo.display()));

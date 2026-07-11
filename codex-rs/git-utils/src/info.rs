@@ -5,8 +5,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use codex_file_system::ExecutorFileSystem;
-use codex_file_system::FindUpErrorPolicy;
-use codex_file_system::find_nearest_native_ancestor_with_markers;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use futures::future::join_all;
@@ -54,15 +52,27 @@ pub async fn get_git_repo_root_with_fs(
         Ok(metadata) if metadata.is_directory => cwd.clone(),
         _ => cwd.parent()?,
     };
-    find_nearest_native_ancestor_with_markers(
-        fs,
-        &base,
-        vec![".git".to_string()],
-        FindUpErrorPolicy::Ignore,
-        /*sandbox*/ None,
-    )
-    .await
-    .ok()?
+    for dir in base.ancestors() {
+        if is_git_entry_with_fs(fs, &dir.join(".git")).await {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+async fn is_git_entry_with_fs(fs: &dyn ExecutorFileSystem, dot_git: &AbsolutePathBuf) -> bool {
+    let dot_git_uri = PathUri::from_abs_path(dot_git);
+    match fs.get_metadata(&dot_git_uri, /*sandbox*/ None).await {
+        Ok(metadata) if metadata.is_file => true,
+        Ok(metadata) if metadata.is_directory => {
+            let head_uri = PathUri::from_abs_path(&dot_git.join("HEAD"));
+            matches!(
+                fs.get_metadata(&head_uri, /*sandbox*/ None).await,
+                Ok(metadata) if metadata.is_file
+            )
+        }
+        _ => false,
+    }
 }
 
 /// Timeout for git commands to prevent freezing on large repositories
@@ -847,7 +857,7 @@ fn find_ancestor_git_entry(base_dir: &Path) -> Option<(PathBuf, PathBuf)> {
 
     loop {
         let dot_git = dir.join(".git");
-        if dot_git.exists() {
+        if dot_git.is_file() || dot_git.join("HEAD").is_file() {
             return Some((dir, dot_git));
         }
 

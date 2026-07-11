@@ -12,6 +12,8 @@ use crate::config::edit::ConfigEditsBuilder;
 
 const INTERNAL_PROFILE_FILE: &str = "internal.config.toml";
 pub const DEFAULT_INTERNAL_PROFILE_MODEL: &str = "gpt-5.4-2026-03-05";
+const INTERNAL_MODEL_MAX_OUTPUT_TOKENS: i64 = 64_000;
+const INTERNAL_MULTI_AGENT_TOOL_NAMESPACE: &str = "agents";
 const AZURE_PROVIDER_ID: &str = "azure";
 const AZURE_API_VERSION: &str = "2025-04-01-preview";
 
@@ -67,7 +69,14 @@ fn installer_owned_edits(ak: &str, azure_base_url: &str, model: &str) -> Vec<Con
         set_path(&["approval_policy"], value("on-request")),
         set_path(&["model_reasoning_effort"], value("xhigh")),
         set_path(&["plan_mode_reasoning_effort"], value("xhigh")),
-        set_path(&["model_max_output_tokens"], value(64_000)),
+        set_path(
+            &["model_max_output_tokens"],
+            value(INTERNAL_MODEL_MAX_OUTPUT_TOKENS),
+        ),
+        set_path(
+            &["features", "multi_agent_v2", "tool_namespace"],
+            value(INTERNAL_MULTI_AGENT_TOOL_NAMESPACE),
+        ),
         set_path(
             &["model_providers", AZURE_PROVIDER_ID, "name"],
             value("Azure"),

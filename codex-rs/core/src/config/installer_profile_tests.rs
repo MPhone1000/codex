@@ -40,6 +40,15 @@ fn bootstrap_internal_profile_creates_profile_v2_defaults() -> anyhow::Result<()
         Some(AZURE_PROVIDER_ID)
     );
     assert_eq!(
+        value_at_path(&profile, &["model_max_output_tokens"]).and_then(TomlValue::as_integer),
+        Some(INTERNAL_MODEL_MAX_OUTPUT_TOKENS)
+    );
+    assert_eq!(
+        value_at_path(&profile, &["features", "multi_agent_v2", "tool_namespace"])
+            .and_then(TomlValue::as_str),
+        Some(INTERNAL_MULTI_AGENT_TOOL_NAMESPACE)
+    );
+    assert_eq!(
         value_at_path(&profile, &["model_providers", "azure", "base_url"])
             .and_then(TomlValue::as_str),
         Some(TEST_AZURE_BASE_URL)

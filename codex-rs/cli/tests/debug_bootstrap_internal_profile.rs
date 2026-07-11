@@ -53,6 +53,15 @@ async fn debug_bootstrap_internal_profile_creates_profile_v2_file() -> Result<()
         Some("gpt-5.4-2026-03-05")
     );
     assert_eq!(
+        value_at_path(&profile, &["model_max_output_tokens"]).and_then(TomlValue::as_integer),
+        Some(64_000)
+    );
+    assert_eq!(
+        value_at_path(&profile, &["features", "multi_agent_v2", "tool_namespace"])
+            .and_then(TomlValue::as_str),
+        Some("agents")
+    );
+    assert_eq!(
         value_at_path(&profile, &["model_providers", "azure", "base_url"])
             .and_then(TomlValue::as_str),
         Some(TEST_AZURE_BASE_URL)

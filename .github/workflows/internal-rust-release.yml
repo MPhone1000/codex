@@ -78,6 +78,8 @@ jobs:
     defaults:
       run:
         working-directory: codex-rs
+    env:
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: ${{ contains(matrix.target, 'apple-darwin') && 'packed' || 'off' }}
     strategy:
       fail-fast: false
       matrix:
@@ -194,6 +196,13 @@ jobs:
           release_dir="target/${{ matrix.target }}/release"
           dest="dist/${{ matrix.target }}"
           mkdir -p "${dest}"
+
+          bash "${GITHUB_WORKSPACE}/.github/scripts/archive-release-symbols-and-strip-binaries.sh" \
+            --target "${{ matrix.target }}" \
+            --artifact-name "${{ matrix.target }}" \
+            --release-dir "${release_dir}" \
+            --archive-dir "${dest}" \
+            --binaries "codex codex-code-mode-host codex-responses-api-proxy"
 
           cp "${release_dir}/codex" "${dest}/codex"
           cp "${release_dir}/codex-responses-api-proxy" "${dest}/codex-responses-api-proxy"
