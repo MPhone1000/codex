@@ -93,6 +93,7 @@ pub(crate) struct TurnMetadataState {
     cwd: AbsolutePathBuf,
     repo_root: Option<PathBuf>,
     session_id: String,
+    wire_session_id: String,
     thread_id: String,
     forked_from_thread_id: Option<ThreadId>,
     parent_thread_id: Option<ThreadId>,
@@ -137,6 +138,7 @@ impl TurnMetadataState {
         Self {
             cwd,
             repo_root,
+            wire_session_id: session_id.clone(),
             session_id,
             thread_id,
             forked_from_thread_id,
@@ -154,6 +156,11 @@ impl TurnMetadataState {
             user_input_requested_during_turn: AtomicBool::new(false),
             enrichment_task: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn with_wire_session_id(mut self, wire_session_id: String) -> Self {
+        self.wire_session_id = wire_session_id;
+        self
     }
 
     pub(crate) fn current_meta_value_for_mcp_request(
@@ -254,6 +261,7 @@ impl TurnMetadataState {
 
     fn responses_metadata_template(&self) -> CodexResponsesMetadata {
         CodexResponsesMetadata {
+            wire_session_id: self.wire_session_id.clone(),
             turn_id: Some(self.turn_id.clone()),
             forked_from_thread_id: self.forked_from_thread_id,
             parent_thread_id: self.parent_thread_id,
