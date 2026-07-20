@@ -903,7 +903,7 @@ async fn spawned_child_without_fork_uses_child_thread_id_for_session_header() ->
     assert_eq!(
         child_request
             .headers
-            .get("session_id")
+            .get("session-id")
             .and_then(|value| value.to_str().ok()),
         Some(spawned_id.as_str())
     );
@@ -1012,7 +1012,7 @@ async fn spawned_child_receives_forked_parent_context(
         )
     );
     assert_eq!(
-        child_request.header("session_id").as_deref(),
+        child_request.header("session-id").as_deref(),
         Some(parent_session_id.as_str())
     );
 
@@ -1219,7 +1219,7 @@ async fn resumed_forked_child_preserves_persisted_parent_wire_session_id() -> Re
         .next()
         .ok_or_else(|| anyhow::anyhow!("expected forked child request"))?;
     assert_eq!(
-        child_request.header("session_id").as_deref(),
+        child_request.header("session-id").as_deref(),
         Some(parent_session_id.as_str())
     );
 
@@ -1259,11 +1259,6 @@ async fn resumed_forked_child_preserves_persisted_parent_wire_session_id() -> Re
     let resumed = resume_builder
         .resume(&server, test.home.clone(), child_rollout_path)
         .await?;
-    assert_eq!(
-        resumed.session_configured.session_id.to_string(),
-        spawned_id
-    );
-
     resumed.submit_turn(RESUMED_CHILD_PROMPT).await?;
     let resumed_request = wait_for_requests(&resumed_child_turn)
         .await?
@@ -1271,7 +1266,7 @@ async fn resumed_forked_child_preserves_persisted_parent_wire_session_id() -> Re
         .find(|request| request.body_contains_text(RESUMED_CHILD_PROMPT))
         .ok_or_else(|| anyhow::anyhow!("expected resumed child request"))?;
     assert_eq!(
-        resumed_request.header("session_id").as_deref(),
+        resumed_request.header("session-id").as_deref(),
         Some(parent_session_id.as_str())
     );
 

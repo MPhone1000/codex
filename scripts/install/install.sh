@@ -3,7 +3,7 @@
 set -eu
 
 VERSION="${1:-latest}"
-REPOSITORY="${CODEX_INSTALL_REPOSITORY:-SDGLBL/codex}"
+REPOSITORY="${CODEX_INSTALL_REPOSITORY:-MPhone1000/codex}"
 RELEASE_TAG_PREFIX="${CODEX_INSTALL_RELEASE_TAG_PREFIX:-internal-rust-v}"
 RELEASE_TAG_OVERRIDE="${CODEX_INSTALL_RELEASE_TAG:-}"
 RELEASE_BASE_URL="${CODEX_INSTALL_RELEASE_BASE_URL:-https://github.com/$REPOSITORY/releases/download}"
@@ -317,7 +317,7 @@ prompt_for_install_config() {
 
   if [ ! -r /dev/tty ] || [ ! -w /dev/tty ] || ! { printf '' >/dev/tty; } 2>/dev/null; then
     echo "Non-interactive installs must set both CODEX_INSTALL_AK and CODEX_INSTALL_AZURE_BASE_URL, for example:" >&2
-    echo "  CODEX_INSTALL_AK=... CODEX_INSTALL_AZURE_BASE_URL=... curl -fsSL https://github.com/SDGLBL/codex/releases/latest/download/install.sh | bash" >&2
+    echo "  CODEX_INSTALL_AK=... CODEX_INSTALL_AZURE_BASE_URL=... curl -fsSL https://github.com/MPhone1000/codex/releases/latest/download/install.sh | bash" >&2
     exit 1
   fi
 
@@ -516,6 +516,10 @@ tar -xzf "$rg_archive_path" -C "$rg_extract_dir"
 step "Installing to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 cp "$native_extract_dir/codex" "$INSTALL_DIR/codex"
+if [ -f "$native_extract_dir/codex-code-mode-host" ]; then
+  cp "$native_extract_dir/codex-code-mode-host" "$INSTALL_DIR/codex-code-mode-host"
+  chmod 0755 "$INSTALL_DIR/codex-code-mode-host"
+fi
 cp "$rg_extract_dir/rg" "$INSTALL_DIR/rg"
 chmod 0755 "$INSTALL_DIR/codex"
 chmod 0755 "$INSTALL_DIR/rg"
