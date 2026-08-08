@@ -99,16 +99,18 @@ git push -u upstream candidate/queue/rust-vX.Y.Z
 
 ## 6. 直接触发内部发布Action
 
+必须通过`--ref`指定候选分支，以确保GitHub使用候选分支中的最新工作流定义，而不是默认分支中的旧版本。
+
 发布版本：
 
 ```bash
-gh workflow run internal-rust-release.yml -R SDGLBL/codex -f upstream_tag=rust-vX.Y.Z -f release_ref=candidate/queue/rust-vX.Y.Z -f internal_tag=internal-rust-vX.Y.Z -f publish=true
+gh workflow run internal-rust-release.yml --ref candidate/queue/rust-vX.Y.Z -R MPhone1000/codex -f upstream_tag=rust-vX.Y.Z -f release_ref=candidate/queue/rust-vX.Y.Z -f internal_tag=internal-rust-vX.Y.Z -f publish=true
 ```
 
 仅进行空跑捆绑：
 
 ```bash
-gh workflow run internal-rust-release.yml -R SDGLBL/codex -f upstream_tag=rust-vX.Y.Z -f release_ref=candidate/queue/rust-vX.Y.Z -f internal_tag=internal-rust-vX.Y.Z-dryrun -f publish=false
+gh workflow run internal-rust-release.yml --ref candidate/queue/rust-vX.Y.Z -R MPhone1000/codex -f upstream_tag=rust-vX.Y.Z -f release_ref=candidate/queue/rust-vX.Y.Z -f internal_tag=internal-rust-vX.Y.Z-dryrun -f publish=false
 ```
 
 ## 7. 验证输出
