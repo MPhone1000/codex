@@ -95,6 +95,7 @@ pub enum RolloutRecorderParams {
     Create {
         session_id: SessionId,
         conversation_id: ThreadId,
+        wire_session_id: ThreadId,
         /// Overrides the rollout ID encoded in the filename.
         ///
         /// Normally this is `None`, so the filename is
@@ -187,6 +188,7 @@ impl RolloutRecorderParams {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         conversation_id: ThreadId,
+        wire_session_id: ThreadId,
         forked_from_id: Option<ThreadId>,
         parent_thread_id: Option<ThreadId>,
         source: SessionSource,
@@ -198,6 +200,7 @@ impl RolloutRecorderParams {
         Self::Create {
             session_id: conversation_id.into(),
             conversation_id,
+            wire_session_id,
             rollout_id_override: None,
             forked_from_id,
             forked_from_ordinal_exclusive: None,
@@ -842,6 +845,7 @@ impl RolloutRecorder {
             RolloutRecorderParams::Create {
                 session_id,
                 conversation_id,
+                wire_session_id,
                 rollout_id_override,
                 forked_from_id,
                 forked_from_ordinal_exclusive,
@@ -874,6 +878,7 @@ impl RolloutRecorder {
                 let session_meta = SessionMeta {
                     session_id,
                     id: conversation_id,
+                    wire_session_id: Some(wire_session_id),
                     forked_from_id,
                     forked_from_ordinal_exclusive: forked_from_ordinal_exclusive
                         .filter(|_| forked_from_id.is_some()),
