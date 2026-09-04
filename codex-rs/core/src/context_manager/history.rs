@@ -357,12 +357,21 @@ impl ContextManager {
                 continue;
             }
 
+            let preserve_code_mode_exec_output = matches!(
+                item,
+                ResponseItem::CustomToolCallOutput {
+                    call_id,
+                    name,
+                    ..
+                } if self.is_code_mode_exec_output(call_id, name.as_deref())
+            );
             let mut processed = ResponseItemEnvelope {
                 item: item.clone(),
                 metadata: metadata.cloned(),
             };
-            if let ResponseItem::FunctionCallOutput { output, .. }
-            | ResponseItem::CustomToolCallOutput { output, .. } = &mut processed.item
+            if !preserve_code_mode_exec_output
+                && let ResponseItem::FunctionCallOutput { output, .. }
+                | ResponseItem::CustomToolCallOutput { output, .. } = &mut processed.item
             {
                 // The override already includes the tool's serialization allowance.
                 let policy = metadata
@@ -764,6 +773,25 @@ impl ContextManager {
             }
         }
         cut_idx
+    }
+
+    fn is_code_mode_exec_output(&self, call_id: &str, output_name: Option<&str>) -> bool {
+        const CODE_MODE_EXEC_TOOL_NAME: &str = "exec";
+
+        if output_name == Some(CODE_MODE_EXEC_TOOL_NAME) {
+            return true;
+        }
+
+        self.items.iter().rev().any(|item| {
+            matches!(
+                item,
+                ResponseItem::CustomToolCall {
+                    call_id: custom_call_id,
+                    name,
+                    ..
+                } if custom_call_id == call_id && name == CODE_MODE_EXEC_TOOL_NAME
+            )
+        })
     }
 }
 
