@@ -4,7 +4,6 @@ use crate::ToolName;
 use crate::parse_agent_plugin_mcp_tool;
 use crate::parse_dynamic_tool;
 use crate::parse_mcp_tool;
-use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::dynamic_tools::DynamicToolFunctionSpec;
 use serde::Deserialize;
 use serde::Serialize;
@@ -62,11 +61,7 @@ pub struct ResponsesApiNamespace {
 }
 
 pub fn default_namespace_description(namespace_name: &str) -> String {
-    if namespace_name == DEFAULT_FUNCTION_NAMESPACE {
-        String::new()
-    } else {
-        format!("Tools in the {namespace_name} namespace.")
-    }
+    format!("Tools in the {namespace_name} namespace.")
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

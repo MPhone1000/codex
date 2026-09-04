@@ -227,12 +227,12 @@ fn responses_lite_groups_default_function_and_custom_tools() {
 }
 
 #[test]
-fn responses_lite_preserves_empty_functions_namespace_description() {
+fn responses_lite_uses_non_empty_functions_namespace_description() {
     let tools = create_tools_json_for_responses_lite(&[ToolSpec::Function(
         responses_lite_function("lookup_order"),
     )])
     .expect("serialize Responses Lite tools");
-    assert_eq!(tools[0]["description"], "");
+    assert_eq!(tools[0]["description"], "Tools in the functions namespace.");
 }
 
 #[test]
