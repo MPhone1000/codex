@@ -187,6 +187,9 @@ pub struct ConfigToml {
     #[schemars(range(min = 0, max = 100))]
     pub model_post_turn_compact_threshold_percent: Option<u8>,
 
+    /// Optional override of the maximum output tokens to request from the model.
+    pub model_max_output_tokens: Option<i64>,
+
     /// Default approval policy for executing commands.
     #[schemars(with = "Option<crate::schema::ConfigAskForApproval>")]
     pub approval_policy: Option<AskForApproval>,
