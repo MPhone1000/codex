@@ -371,6 +371,7 @@ fn responses_request_properties_match(
         text: previous_text,
         client_metadata: _,
         access_programs: _,
+        max_output_tokens: _,
     } = previous;
     let ResponsesApiRequest {
         model: current_model,
@@ -389,6 +390,7 @@ fn responses_request_properties_match(
         text: current_text,
         client_metadata: _,
         access_programs: _,
+        max_output_tokens: _,
     } = current;
 
     previous_model == current_model

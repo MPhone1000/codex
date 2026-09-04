@@ -62,6 +62,7 @@ async fn timeline_pages_mix_items_and_resolve_the_opening_realtime_session() -> 
             session_id: thread_id.into(),
             thread_id,
             extra_config: None,
+            wire_session_id: thread_id,
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Cli,
