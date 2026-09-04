@@ -320,7 +320,7 @@ jobs:
 
       - name: Publish GitHub Release
         if: ${{ needs.meta.outputs.publish == 'true' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ needs.meta.outputs.version }}-internal
           tag_name: ${{ needs.meta.outputs.internal_tag }}
