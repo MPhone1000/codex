@@ -8,7 +8,6 @@ use codex_api::ApiError;
 use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_api::TransportError;
-use codex_api::is_azure_responses_provider;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::default_client::RESIDENCY_HEADER_NAME;
@@ -351,9 +350,7 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        let remote_compaction = if self.info.is_openai()
-            || is_azure_responses_provider(&self.info.name, self.info.base_url.as_deref())
-        {
+        let remote_compaction = if self.info.is_openai() {
             RemoteCompactionSupport::V2
         } else {
             RemoteCompactionSupport::Unsupported
@@ -673,7 +670,7 @@ mod tests {
                     base_url: Some("https://example.com/openai".to_string()),
                     ..ModelProviderInfo::default()
                 },
-                RemoteCompactionSupport::V2,
+                RemoteCompactionSupport::Unsupported,
             ),
             (
                 ModelProviderInfo {
@@ -681,7 +678,7 @@ mod tests {
                     base_url: Some("https://example.openai.azure.com/openai/v1".to_string()),
                     ..ModelProviderInfo::default()
                 },
-                RemoteCompactionSupport::V2,
+                RemoteCompactionSupport::Unsupported,
             ),
             (
                 provider_for("https://example.test/v1".to_string()),
