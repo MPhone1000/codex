@@ -264,6 +264,7 @@ fn create_thread_params(thread_id: ThreadId) -> CreateThreadParams {
         session_id: thread_id.into(),
         thread_id,
         extra_config: None,
+        wire_session_id: thread_id,
         forked_from_id: None,
         parent_thread_id: None,
         source: SessionSource::Exec,
