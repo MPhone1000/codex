@@ -372,9 +372,7 @@ pub(crate) async fn process_annotated_compacted_history(
 /// - `user`-role warnings that parse as `TurnItem::UserMessage` and compaction-generated summary
 ///   messages. Legacy warning fragments are filtered by `parse_turn_item` before they reach this
 ///   check.
-fn retain_compacted_history_items(
-    items: Vec<ResponseItemEnvelope>,
-) -> Vec<ResponseItemEnvelope> {
+fn retain_compacted_history_items(items: Vec<ResponseItemEnvelope>) -> Vec<ResponseItemEnvelope> {
     let mut retained = Vec::with_capacity(items.len());
     let mut pending_reasoning = None;
 
@@ -393,7 +391,8 @@ fn retain_compacted_history_items(
                 if let Some(reasoning) = pending_reasoning.take() {
                     retained.extend(reasoning.into_items());
                     retained.extend(group.into_items());
-                } else if let Some(summary) = assistant_message_as_user_summary(&group.source.item) {
+                } else if let Some(summary) = assistant_message_as_user_summary(&group.source.item)
+                {
                     retained.push(ResponseItemEnvelope::new(summary));
                 }
             }
