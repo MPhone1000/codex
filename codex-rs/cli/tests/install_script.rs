@@ -414,7 +414,12 @@ fn install_script_selects_linux_x86_64_musl_asset_and_bootstraps_config() -> Res
     );
     assert_eq!(
         value_at_path(&config, &["features", "multi_agent"]).and_then(TomlValue::as_bool),
-        Some(true)
+        None
+    );
+    assert_eq!(
+        value_at_path(&config, &["agents", "max_concurrent_threads_per_session"])
+            .and_then(TomlValue::as_integer),
+        Some(8)
     );
     assert_eq!(
         value_at_path(&config, &["tui", "notification_condition"]),

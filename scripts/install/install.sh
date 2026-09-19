@@ -368,31 +368,17 @@ sandbox_mode = "danger-full-access"
 approval_policy = "on-request"
 model_reasoning_effort = "xhigh"
 plan_mode_reasoning_effort = "xhigh"
-model_max_output_tokens = 64000
-background_terminal_max_timeout = 72000000
-project_doc_max_bytes = 65536
 suppress_unstable_features_warning = true
 
 [shell_environment_policy]
-inherit = "all"
 ignore_default_excludes = true
 
 [features]
 apps = false
-guardian_approval = false
 prevent_idle_sleep = true
-tui_app_server = false
-hooks = true
-multi_agent = true
-voice_transcription = false
-enable_fanout = true
-goals = true
-remote_connections = true
-js_repl = false
 
 [agents]
-max_threads = 8
-max_depth = 1
+max_concurrent_threads_per_session = 8
 
 [tui]
 theme = "catppuccin-latte"
