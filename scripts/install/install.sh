@@ -368,6 +368,7 @@ sandbox_mode = "danger-full-access"
 approval_policy = "on-request"
 model_reasoning_effort = "xhigh"
 plan_mode_reasoning_effort = "xhigh"
+model_max_output_tokens = 64000
 suppress_unstable_features_warning = true
 
 [shell_environment_policy]
