@@ -2893,7 +2893,7 @@
       "properties": {
         "default_wait_timeout_ms": {
           "format": "int64",
-          "maximum": 3600000.0,
+          "maximum": 14400000.0,
           "minimum": 0.0,
           "type": "integer"
         },
@@ -2918,7 +2918,7 @@
         },
         "max_wait_timeout_ms": {
           "format": "int64",
-          "maximum": 3600000.0,
+          "maximum": 14400000.0,
           "minimum": 0.0,
           "type": "integer"
         },
@@ -2936,7 +2936,7 @@
         },
         "min_wait_timeout_ms": {
           "format": "int64",
-          "maximum": 3600000.0,
+          "maximum": 14400000.0,
           "minimum": 0.0,
           "type": "integer"
         },
