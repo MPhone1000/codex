@@ -9,6 +9,8 @@ use std::process::Command;
 use anyhow::Context;
 use anyhow::Result;
 use pretty_assertions::assert_eq;
+use sha2::Digest;
+use sha2::Sha256;
 use tempfile::TempDir;
 use toml::Value as TomlValue;
 
@@ -69,37 +71,51 @@ fn create_release_fixture_with_codex(
     )?;
 
     let native_stage = TempDir::new_in(root)?;
-    let native_asset_name = format!("codex-{}.tar.gz", platform.vendor_target);
-    let native_binary_path = native_stage.path().join("codex");
+    let native_asset_name = format!("codex-package-{}.tar.gz", platform.vendor_target);
+    fs::create_dir_all(native_stage.path().join("bin"))?;
+    fs::create_dir_all(native_stage.path().join("codex-resources"))?;
+    fs::create_dir_all(native_stage.path().join("codex-path"))?;
+    let native_binary_path = native_stage.path().join("bin/codex");
     fs::copy(codex_source, &native_binary_path)?;
     make_executable(&native_binary_path)?;
-    let code_mode_host_path = native_stage.path().join("codex-code-mode-host");
+    let code_mode_host_path = native_stage.path().join("bin/codex-code-mode-host");
     fs::write(
         &code_mode_host_path,
         "#!/bin/sh\necho code mode host smoke test\n",
     )?;
     make_executable(&code_mode_host_path)?;
+    let rg_path = native_stage.path().join("codex-path/rg");
+    fs::write(&rg_path, "#!/bin/sh\necho rg smoke test\n")?;
+    make_executable(&rg_path)?;
+    if platform.uname_s == "Linux" {
+        let bwrap_path = native_stage.path().join("codex-resources/bwrap");
+        fs::write(&bwrap_path, "#!/bin/sh\necho bwrap smoke test\n")?;
+        make_executable(&bwrap_path)?;
+    }
+    fs::write(
+        native_stage.path().join("codex-package.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "layoutVersion": 1,
+            "version": INSTALL_VERSION,
+            "target": platform.vendor_target,
+            "variant": "codex",
+            "entrypoint": "bin/codex",
+            "resourcesDir": "codex-resources",
+            "pathDir": "codex-path",
+        }))?,
+    )?;
     run_command(
         Command::new("tar")
             .arg("-C")
             .arg(native_stage.path())
             .arg("-czf")
-            .arg(release_dir.join(native_asset_name))
-            .arg("codex")
-            .arg("codex-code-mode-host"),
+            .arg(release_dir.join(&native_asset_name))
+            .arg("."),
     )?;
-
-    let rg_stage = TempDir::new_in(root)?;
-    let rg_path = rg_stage.path().join("rg");
-    fs::write(&rg_path, "#!/bin/sh\necho rg smoke test\n")?;
-    make_executable(&rg_path)?;
-    run_command(
-        Command::new("tar")
-            .arg("-C")
-            .arg(rg_stage.path())
-            .arg("-czf")
-            .arg(release_dir.join(format!("rg-{}.tar.gz", platform.vendor_target)))
-            .arg("rg"),
+    let digest = Sha256::digest(fs::read(release_dir.join(&native_asset_name))?);
+    fs::write(
+        release_dir.join(format!("{native_asset_name}.sha256")),
+        format!("{digest:x}  {native_asset_name}\n"),
     )?;
 
     Ok(format!(
@@ -111,6 +127,15 @@ fn create_release_fixture_with_codex(
 fn create_release_fixture(root: &Path, platform: &PlatformFixture<'_>) -> Result<String> {
     let codex_path = codex_binary_path()?;
     create_release_fixture_with_codex(root, platform, &codex_path, INSTALL_TAG)
+}
+
+fn installed_package_path(install_dir: &Path) -> Result<PathBuf> {
+    let entrypoint = install_dir.join("codex").canonicalize()?;
+    entrypoint
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .context("installed CLI must be inside the package bin directory")
 }
 
 fn run_command(command: &mut Command) -> Result<()> {
@@ -386,7 +411,11 @@ fn install_script_selects_linux_x86_64_musl_asset_and_bootstraps_config() -> Res
 
     let install_dir = home.path().join(".local").join("bin");
     assert!(install_dir.join("codex").is_file());
-    assert!(install_dir.join("rg").is_file());
+    assert!(
+        installed_package_path(&install_dir)?
+            .join("codex-path/rg")
+            .is_file()
+    );
     assert!(home.path().join(".profile").is_file());
 
     let config = read_installed_config(home.path())?;
@@ -474,10 +503,8 @@ fn install_script_resolves_latest_version_from_install_url_when_api_lookup_fails
             .is_file()
     );
     assert!(
-        home.path()
-            .join(".local")
-            .join("bin")
-            .join("codex-code-mode-host")
+        installed_package_path(&home.path().join(".local/bin"))?
+            .join("bin/codex-code-mode-host")
             .is_file()
     );
 
@@ -948,7 +975,10 @@ fn install_script_does_not_run_installed_codex_to_write_config() -> Result<()> {
 
     let fake_codex_dir = TempDir::new_in(fixtures.path())?;
     let fake_codex_path = fake_codex_dir.path().join("codex");
-    fs::write(&fake_codex_path, "#!/bin/sh\nexit 137\n")?;
+    fs::write(
+        &fake_codex_path,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nexit 137\n",
+    )?;
     make_executable(&fake_codex_path)?;
 
     let release_base_url = create_release_fixture_with_codex(
@@ -987,7 +1017,11 @@ fn install_script_does_not_run_installed_codex_to_write_config() -> Result<()> {
 
     let install_dir = home.path().join(".local").join("bin");
     assert!(install_dir.join("codex").is_file());
-    assert!(install_dir.join("rg").is_file());
+    assert!(
+        installed_package_path(&install_dir)?
+            .join("codex-path/rg")
+            .is_file()
+    );
     let config = read_installed_config(home.path())?;
     assert_eq!(
         value_at_path(&config, &["model_provider"]).and_then(TomlValue::as_str),
