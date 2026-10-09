@@ -329,6 +329,7 @@ impl HttpTransport for Flaky429Transport {
                 url: None,
                 headers: None,
                 body: Some("rate limit".to_string()),
+                retry_after: None,
             });
         }
 
