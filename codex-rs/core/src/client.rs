@@ -177,6 +177,7 @@ const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER: &str =
     "x-openai-internal-codex-responses-lite";
 const REALTIME_CALLS_ENDPOINT: &str = "/realtime/calls";
 const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
+
 #[cfg(test)]
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
     Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
@@ -209,6 +210,7 @@ struct ModelClientState {
     model_verbosity: Option<VerbosityConfig>,
     content_item_kinds_enabled: bool,
     reasoning_effort_override_enabled: bool,
+    model_max_output_tokens: Option<i64>,
     enable_request_compression: bool,
     include_timing_metrics: bool,
     beta_features_header: Option<String>,
@@ -549,6 +551,7 @@ impl ModelClient {
         model_verbosity: Option<VerbosityConfig>,
         content_item_kinds_enabled: bool,
         reasoning_effort_override_enabled: bool,
+        model_max_output_tokens: Option<i64>,
         enable_request_compression: bool,
         include_timing_metrics: bool,
         beta_features_header: Option<String>,
@@ -588,6 +591,7 @@ impl ModelClient {
                 model_verbosity,
                 content_item_kinds_enabled,
                 reasoning_effort_override_enabled,
+                model_max_output_tokens,
                 enable_request_compression,
                 include_timing_metrics,
                 beta_features_header,
@@ -1085,6 +1089,7 @@ impl ModelClient {
             text,
             client_metadata: Some(client_metadata),
             access_programs: None,
+            max_output_tokens: self.state.model_max_output_tokens,
         };
         Ok(request)
     }
