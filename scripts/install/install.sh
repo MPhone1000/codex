@@ -470,51 +470,109 @@ step "$install_mode Codex CLI"
 step "Detected platform: $platform_label"
 
 resolved_tag="$(resolve_release_tag)"
+case "$resolved_tag" in
+  "" | *[!A-Za-z0-9._+-]*)
+    echo "Invalid Codex release tag: $resolved_tag" >&2
+    exit 1
+    ;;
+esac
 resolved_version="$(normalize_version "$resolved_tag")"
-native_asset="codex-$vendor_target.tar.gz"
-rg_asset="rg-$vendor_target.tar.gz"
-native_download_url="$(release_url_for_asset "$native_asset" "$resolved_tag")"
-rg_download_url="$(release_url_for_asset "$rg_asset" "$resolved_tag")"
+package_asset="codex-package-$vendor_target.tar.gz"
+checksum_asset="$package_asset.sha256"
+package_download_url="$(release_url_for_asset "$package_asset" "$resolved_tag")"
+checksum_download_url="$(release_url_for_asset "$checksum_asset" "$resolved_tag")"
 
 step "Resolved version: $resolved_version"
 
 tmp_dir="$(mktemp -d)"
+staged_release_dir=""
+link_dir=""
 cleanup() {
   rm -rf "$tmp_dir"
+  if [ -n "$staged_release_dir" ]; then
+    rm -rf "$staged_release_dir"
+  fi
+  if [ -n "$link_dir" ]; then
+    rm -rf "$link_dir"
+  fi
 }
 trap cleanup EXIT INT TERM
 
-native_archive_path="$tmp_dir/$native_asset"
-rg_archive_path="$tmp_dir/$rg_asset"
-native_extract_dir="$tmp_dir/native"
-rg_extract_dir="$tmp_dir/rg"
+package_archive_path="$tmp_dir/$package_asset"
+checksum_path="$tmp_dir/$checksum_asset"
 
-mkdir -p "$native_extract_dir" "$rg_extract_dir"
+step "Downloading Codex CLI package"
+download_file "$package_download_url" "$package_archive_path"
+download_file "$checksum_download_url" "$checksum_path"
 
-step "Downloading Codex CLI"
-download_file "$native_download_url" "$native_archive_path"
-
-step "Downloading bundled rg"
-download_file "$rg_download_url" "$rg_archive_path"
-
-tar -xzf "$native_archive_path" -C "$native_extract_dir"
-tar -xzf "$rg_archive_path" -C "$rg_extract_dir"
-
-step "Installing to $INSTALL_DIR"
-mkdir -p "$INSTALL_DIR"
-cp "$native_extract_dir/codex" "$INSTALL_DIR/codex"
-if [ -f "$native_extract_dir/codex-code-mode-host" ]; then
-  cp "$native_extract_dir/codex-code-mode-host" "$INSTALL_DIR/codex-code-mode-host"
-  chmod 0755 "$INSTALL_DIR/codex-code-mode-host"
+expected_checksum="$(sed -n '1s/[[:space:]].*$//p' "$checksum_path")"
+case "$expected_checksum" in
+  *[!0-9a-fA-F]* | "")
+    echo "Invalid checksum for $package_asset." >&2
+    exit 1
+    ;;
+esac
+if [ "${#expected_checksum}" -ne 64 ]; then
+  echo "Invalid checksum for $package_asset." >&2
+  exit 1
 fi
-cp "$rg_extract_dir/rg" "$INSTALL_DIR/rg"
-chmod 0755 "$INSTALL_DIR/codex"
-chmod 0755 "$INSTALL_DIR/rg"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual_checksum="$(sha256sum "$package_archive_path" | sed 's/[[:space:]].*$//')"
+elif command -v shasum >/dev/null 2>&1; then
+  actual_checksum="$(shasum -a 256 "$package_archive_path" | sed 's/[[:space:]].*$//')"
+else
+  echo "sha256sum or shasum is required to verify the Codex package." >&2
+  exit 1
+fi
+if [ "$actual_checksum" != "$expected_checksum" ]; then
+  echo "Checksum mismatch for $package_asset." >&2
+  exit 1
+fi
+
+# Keep fork packages outside the upstream standalone update channel.
+releases_dir="$INSTALL_CODEX_HOME/packages/internal/releases"
+mkdir -p "$releases_dir"
+releases_dir="$(cd "$releases_dir" && pwd -P)"
+staged_release_dir="$(mktemp -d "$releases_dir/$resolved_tag-$vendor_target.XXXXXX")"
+tar -xzf "$package_archive_path" -C "$staged_release_dir"
+
+manifest="$staged_release_dir/codex-package.json"
+if [ ! -f "$manifest" ] ||
+  ! grep -Fq '"layoutVersion": 1' "$manifest" ||
+  ! grep -Eq '"version": "[0-9]+\.[0-9]+\.[0-9]+[^"]*"' "$manifest" ||
+  ! grep -Fq "\"target\": \"$vendor_target\"" "$manifest" ||
+  ! grep -Fq '"variant": "codex"' "$manifest" ||
+  ! grep -Fq '"entrypoint": "bin/codex"' "$manifest" ||
+  [ ! -d "$staged_release_dir/codex-resources" ] ||
+  [ ! -x "$staged_release_dir/bin/codex" ] ||
+  [ ! -x "$staged_release_dir/bin/codex-code-mode-host" ] ||
+  [ ! -x "$staged_release_dir/codex-path/rg" ]; then
+  echo "Downloaded Codex package is incomplete or does not match $vendor_target." >&2
+  exit 1
+fi
+if [ "$os" = "linux" ] && [ ! -x "$staged_release_dir/codex-resources/bwrap" ]; then
+  echo "Downloaded Codex package is missing executable codex-resources/bwrap." >&2
+  exit 1
+fi
+"$staged_release_dir/bin/codex" --version >/dev/null
 
 prompt_for_install_config
 
 step "Configuring config.toml"
 write_install_config
+
+step "Installing to $INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
+if [ -d "$INSTALL_DIR/codex" ]; then
+  echo "$INSTALL_DIR/codex is a directory; cannot replace it with the CLI entrypoint." >&2
+  exit 1
+fi
+link_dir="$(mktemp -d "$INSTALL_DIR/.codex-install.XXXXXX")"
+ln -s "$staged_release_dir/bin/codex" "$link_dir/codex"
+mv -f "$link_dir/codex" "$INSTALL_DIR/codex"
+staged_release_dir=""
+rmdir "$link_dir"
+link_dir=""
 
 add_to_path
 
