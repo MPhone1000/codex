@@ -2210,6 +2210,7 @@ fn record_items_preserves_code_mode_exec_output_after_exec_budgeting() {
         call_id: "call-code-mode-exec".to_string(),
         name: "exec".to_string(),
         namespace: None,
+        encrypted_content: None,
         input: "// @exec: {\"max_output_tokens\": 20000}\ntext(result.output);".to_string(),
         internal_chat_message_metadata_passthrough: None,
     };
