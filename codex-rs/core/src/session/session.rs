@@ -1030,10 +1030,6 @@ impl Session {
                     Arc::default()
                 }
             });
-        let isolation = thread_extension_init
-            .get::<codex_extension_api::SessionIsolation>()
-            .map(|policy| *policy)
-            .unwrap_or_default();
         let wire_session_id = session_configuration.wire_session_id.unwrap_or(thread_id);
         session_configuration.wire_session_id = Some(wire_session_id);
         let mcp_thread_init = thread_extension_init.clone();

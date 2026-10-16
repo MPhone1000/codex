@@ -481,6 +481,7 @@ async fn responses_client_stream_request_sends_routing_fields_ahead_of_large_inp
         text: None,
         client_metadata: None,
         access_programs: None,
+        max_output_tokens: None,
     };
     let expected = serde_json::to_value(&request)?;
 
@@ -614,7 +615,6 @@ async fn responses_request_omits_absent_max_output_tokens() -> Result<()> {
 
     let request = ResponsesApiRequest {
         model: "gpt-test".into(),
-        instructions: "Say hi".into(),
         input: Vec::new(),
         tools: Some(empty_tools().into()),
         tool_choice: "auto".into(),
@@ -718,7 +718,6 @@ async fn streaming_client_retries_on_http_429_when_enabled() -> Result<()> {
 
     let request = ResponsesApiRequest {
         model: "gpt-test".into(),
-        instructions: "Say hi".into(),
         input: Vec::new(),
         tools: Some(empty_tools().into()),
         tool_choice: "auto".into(),
