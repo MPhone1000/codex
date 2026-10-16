@@ -1346,10 +1346,6 @@
           ],
           "description": "Optional path to a file containing model instructions."
         },
-        "model_max_output_tokens": {
-          "format": "int64",
-          "type": "integer"
-        },
         "model_provider": {
           "description": "The key in the `model_providers` map identifying the [`ModelProviderInfo`] to use.",
           "type": "string"
