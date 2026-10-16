@@ -739,7 +739,7 @@ mod tests {
                     base_url: Some("https://example.com/openai".to_string()),
                     ..ModelProviderInfo::default()
                 },
-                RemoteCompactionSupport::V2,
+                RemoteCompactionSupport::Unsupported,
             ),
             (
                 ModelProviderInfo {
@@ -747,7 +747,7 @@ mod tests {
                     base_url: Some("https://example.openai.azure.com/openai/v1".to_string()),
                     ..ModelProviderInfo::default()
                 },
-                RemoteCompactionSupport::V2,
+                RemoteCompactionSupport::Unsupported,
             ),
             (
                 provider_for("https://example.test/v1".to_string()),

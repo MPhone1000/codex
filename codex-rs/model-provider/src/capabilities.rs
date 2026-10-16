@@ -1,6 +1,5 @@
 //! Provider capability defaults and resolution of custom provider overrides.
 
-use codex_api::is_azure_responses_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::RemoteCompactionSupport;
 
@@ -30,9 +29,7 @@ impl Default for ProviderCapabilities {
 impl ProviderCapabilities {
     pub(crate) fn from_config(info: &ModelProviderInfo) -> Self {
         let defaults = Self {
-            remote_compaction: if info.is_openai()
-                || is_azure_responses_provider(&info.name, info.base_url.as_deref())
-            {
+            remote_compaction: if info.is_openai() {
                 RemoteCompactionSupport::V2
             } else {
                 RemoteCompactionSupport::Unsupported
