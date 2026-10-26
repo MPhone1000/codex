@@ -410,6 +410,7 @@ fn responses_request_properties_mismatch(
         text: previous_text,
         client_metadata: _,
         access_programs: _,
+        max_output_tokens: _,
     } = previous;
     let ResponsesApiRequest {
         model: current_model,
@@ -427,6 +428,7 @@ fn responses_request_properties_mismatch(
         text: current_text,
         client_metadata: _,
         access_programs: _,
+        max_output_tokens: _,
     } = current;
 
     // Stream options control delivery for this response, not the context
