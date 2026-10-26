@@ -126,6 +126,8 @@ gh release view internal-rust-vX.Y.Z --repo MPhone1000/codex
 - 发布存在，且具有预期的标签/版本
 - 发布说明包含上游标签和补丁栈
 - 发布资产包含内部二进制文件、`config.schema.json`、`install.sh`、`install.ps1`以及`rg`捆绑包
+- macOS/Linux 完整包为 `codex-package-<target>.tar.gz`，同时提供 `.sha256` 校验文件；包内包含 manifest、CLI、code-mode host、`rg`，Linux 还包含 `bwrap`
+- 完整包通过 daemon 启动检查后才能发布；自定义安装脚本将包安装到 `packages/internal/releases`，保留内部安装标识
 
 对于空跑发布，验证工作流运行中上传的`internal-release-dry-run-*`工件。
 
