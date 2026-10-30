@@ -164,6 +164,24 @@ async fn responses_request_enforces_independent_speed_requirements(
     Ok(())
 }
 
+#[tokio::test]
+async fn configured_max_output_tokens_reaches_responses_request() -> anyhow::Result<()> {
+    let server = start_mock_server().await;
+    let response = mount_sse_once(&server, sse(vec![ev_completed("response")])).await;
+    let test = test_codex()
+        .with_config(|config| config.model_max_output_tokens = Some(64_000))
+        .build_with_auto_env(&server)
+        .await?;
+
+    test.submit_text_turn("hello").await?;
+
+    assert_eq!(
+        response.single_request().body_json()["max_output_tokens"],
+        json!(64_000)
+    );
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_request_preserves_flex_without_catalog_support_or_fast_mode()
 -> anyhow::Result<()> {
