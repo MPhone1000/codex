@@ -169,7 +169,7 @@ fn configured_provider_remote_compaction_matches_provider_support() {
                 base_url: Some("https://example.com/openai".to_string()),
                 ..ModelProviderInfo::default()
             },
-            RemoteCompactionSupport::V2,
+            RemoteCompactionSupport::Unsupported,
         ),
         (
             ModelProviderInfo {
@@ -177,7 +177,7 @@ fn configured_provider_remote_compaction_matches_provider_support() {
                 base_url: Some("https://example.openai.azure.com/openai/v1".to_string()),
                 ..ModelProviderInfo::default()
             },
-            RemoteCompactionSupport::V2,
+            RemoteCompactionSupport::Unsupported,
         ),
         (
             provider_for("https://example.test/v1".to_string()),
