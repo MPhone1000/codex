@@ -1,6 +1,6 @@
 # Codex驱动的内部Rust发布操作手册
 
-本操作手册是`SDGLBL/codex`中内部Rust发布的唯一权威来源。
+本操作手册是`MPhone1000/codex`中内部Rust发布的唯一权威来源。
 
 流程设计尽量精简：
 
@@ -14,10 +14,10 @@
 
 开始之前：
 
-1. `gh auth status`对`SDGLBL/codex`处于健康状态。
+1. `gh auth status`对`MPhone1000/codex`处于健康状态。
 2. 本地远程仓库已配置：
-   - `origin` -> `openai/codex`
-   - `upstream` -> `SDGLBL/codex`
+   - `origin` -> `MPhone1000/codex`
+   - `upstream` -> `openai/codex`
 3. 工作区干净。
 
 ## 2. 分支约定
@@ -35,8 +35,8 @@
 ### 步骤A：拉取与预检查
 
 ```bash
-git fetch origin --tags
-git fetch upstream
+git fetch origin
+git fetch upstream --tags
 gh release view rust-vX.Y.Z --repo openai/codex
 ```
 
@@ -51,14 +51,14 @@ git switch -C candidate/queue/rust-vX.Y.Z rust-vX.Y.Z
 使用上一个候选分支作为默认补丁来源，然后将fork补丁重放到新的候选分支上。
 
 ```bash
-git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes/upstream/candidate/queue/rust-v*
+git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes/origin/candidate/queue/rust-v*
 ```
 
-选取上一个已发布的候选分支（示例：`upstream/candidate/queue/rust-v0.124.0`）：
+选取上一个已发布的候选分支（示例：`origin/candidate/queue/rust-v0.124.0`）：
 
 ```bash
-prev_candidate="upstream/candidate/queue/rust-v0.124.0"
-prev_upstream_tag="${prev_candidate#upstream/candidate/queue/}"
+prev_candidate="origin/candidate/queue/rust-v0.124.0"
+prev_upstream_tag="${prev_candidate#origin/candidate/queue/}"
 
 mapfile -t patch_commits < <(
   git rev-list --reverse --no-merges "${prev_upstream_tag}..${prev_candidate}"
@@ -94,7 +94,7 @@ git diff --check
 根据仓库策略，对受影响的Crate运行相关的格式化/测试，然后推送：
 
 ```bash
-git push -u upstream candidate/queue/rust-vX.Y.Z
+git push -u origin candidate/queue/rust-vX.Y.Z
 ```
 
 ## 6. 直接触发内部发布Action
@@ -118,7 +118,7 @@ gh workflow run internal-rust-release.yml --ref candidate/queue/rust-vX.Y.Z -R M
 对于已发布的版本：
 
 ```bash
-gh release view internal-rust-vX.Y.Z --repo SDGLBL/codex
+gh release view internal-rust-vX.Y.Z --repo MPhone1000/codex
 ```
 
 确认：

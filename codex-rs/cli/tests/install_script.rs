@@ -73,13 +73,20 @@ fn create_release_fixture_with_codex(
     let native_binary_path = native_stage.path().join("codex");
     fs::copy(codex_source, &native_binary_path)?;
     make_executable(&native_binary_path)?;
+    let code_mode_host_path = native_stage.path().join("codex-code-mode-host");
+    fs::write(
+        &code_mode_host_path,
+        "#!/bin/sh\necho code mode host smoke test\n",
+    )?;
+    make_executable(&code_mode_host_path)?;
     run_command(
         Command::new("tar")
             .arg("-C")
             .arg(native_stage.path())
             .arg("-czf")
             .arg(release_dir.join(native_asset_name))
-            .arg("codex"),
+            .arg("codex")
+            .arg("codex-code-mode-host"),
     )?;
 
     let rg_stage = TempDir::new_in(root)?;
@@ -461,6 +468,13 @@ fn install_script_resolves_latest_version_from_install_url_when_api_lookup_fails
             .join("codex")
             .is_file()
     );
+    assert!(
+        home.path()
+            .join(".local")
+            .join("bin")
+            .join("codex-code-mode-host")
+            .is_file()
+    );
 
     Ok(())
 }
@@ -489,7 +503,7 @@ fn install_script_resolves_latest_version_from_redirect_location_header() -> Res
     fs::write(
         &fake_curl,
         format!(
-            "#!/bin/sh\nset -eu\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$last\" = \"{fake_latest_url}\" ]; then\n  printf 'HTTP/2 302\\r\\n'\n  printf 'location: https://github.com/SDGLBL/codex/releases/download/{INSTALL_TAG}/install.sh\\r\\n\\r\\n'\n  exit 0\nfi\nexec {real_curl} \"$@\"\n"
+            "#!/bin/sh\nset -eu\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$last\" = \"{fake_latest_url}\" ]; then\n  printf 'HTTP/2 302\\r\\n'\n  printf 'location: https://github.com/MPhone1000/codex/releases/download/{INSTALL_TAG}/install.sh\\r\\n\\r\\n'\n  exit 0\nfi\nexec {real_curl} \"$@\"\n"
         ),
     )?;
     make_executable(&fake_curl)?;
