@@ -103,6 +103,10 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.meta.outputs.release_ref }}
 
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
       - name: Install Linux build dependencies
         if: ${{ runner.os == 'Linux' }}
         shell: bash
@@ -231,6 +235,7 @@ jobs:
             cargo build --locked --target "${target}" --release --jobs 1 --bin codex-responses-api-proxy
             cargo build --locked --target "${target}" --release --jobs 1 --bin codex
             cargo build --locked --target "${target}" --release --jobs 1 --bin codex-code-mode-host
+            cargo build --locked --target "${target}" --release --jobs 1 --bin bwrap
           else
             cargo build --locked --target "${target}" --release --bin codex --bin codex-code-mode-host --bin codex-responses-api-proxy
           fi
@@ -259,6 +264,55 @@ jobs:
 
           rm "${dest}/codex" "${dest}/codex-code-mode-host" "${dest}/codex-responses-api-proxy"
 
+      - name: Assemble complete CLI package
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          release_dir="target/${target}/release"
+          dest="dist/${target}"
+          package_asset="codex-package-${target}.tar.gz"
+          package_args=(
+            --target "${target}"
+            --variant codex
+            --package-version "${{ needs.meta.outputs.version }}"
+            --entrypoint-bin "${release_dir}/codex"
+            --code-mode-host-bin "${release_dir}/codex-code-mode-host"
+            --package-dir "${RUNNER_TEMP}/internal-codex-package-${target}"
+            --archive-output "${dest}/${package_asset}"
+            --force
+          )
+          if [[ "${target}" == *"-linux-"* ]]; then
+            package_args+=(--bwrap-bin "${release_dir}/bwrap")
+          fi
+          export CODEX_REPO_ROOT="${GITHUB_WORKSPACE}"
+          python3 "${GITHUB_WORKSPACE}/scripts/build_codex_package.py" "${package_args[@]}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd "${dest}" && sha256sum "${package_asset}") > "${dest}/${package_asset}.sha256"
+          else
+            (cd "${dest}" && shasum -a 256 "${package_asset}") > "${dest}/${package_asset}.sha256"
+          fi
+
+      - name: Smoke-test packaged daemon startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="${RUNNER_TEMP}/internal-codex-package-${{ matrix.target }}"
+          smoke_home="$(mktemp -d "${RUNNER_TEMP}/codex-daemon-smoke.XXXXXX")"
+          export CODEX_HOME="${smoke_home}"
+          trap '"${package_dir}/bin/codex" app-server daemon stop >/dev/null 2>&1 || true' EXIT
+          python3 - "${package_dir}/bin/codex" <<'PY'
+          import subprocess
+          import sys
+
+          subprocess.run(
+              [sys.argv[1], "app-server", "daemon", "start"],
+              check=True,
+              timeout=90,
+          )
+          PY
+          test -f "${smoke_home}/packages/app-server-daemon/current/codex-package.json"
+
       - uses: actions/upload-artifact@v7
         with:
           name: internal-release-${{ matrix.target }}
@@ -274,6 +328,13 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.meta.outputs.release_ref }}
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Test internal package installer
+        run: python3 scripts/install/test_internal_install_sh.py
 
       - uses: actions/download-artifact@v8
         with:
