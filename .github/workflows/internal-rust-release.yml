@@ -124,8 +124,8 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if rustup toolchain install 1.99.1 --target "${{ matrix.target }}" --profile minimal --component clippy --component rustfmt --component rust-src --no-self-update; then
-              rustup default 1.99.1
+            if rustup toolchain install 1.95.0 --target "${{ matrix.target }}" --profile minimal --component clippy --component rustfmt --component rust-src --no-self-update; then
+              rustup default 1.95.0
               break
             fi
             if [[ "${attempt}" == 3 ]]; then
