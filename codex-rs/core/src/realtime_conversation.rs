@@ -1651,7 +1651,7 @@ async fn prepare_realtime_start(
     }
     .unwrap_or_default();
     extra_headers.extend(build_realtime_thread_headers(
-        sess.session_id().to_string(),
+        sess.wire_session_id().await.to_string(),
         sess.thread_id().to_string(),
         sess.thread_config_snapshot().await.thread_source,
     ));
