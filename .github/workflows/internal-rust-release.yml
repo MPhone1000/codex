@@ -119,13 +119,20 @@ jobs:
           fi
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}"
 
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Ensure Rust target is installed
+      - name: Install Rust toolchain with retries
         shell: bash
-        run: rustup target add "${{ matrix.target }}" --toolchain 1.95.0
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if rustup toolchain install 1.95.0 --target "${{ matrix.target }}" --profile minimal --no-self-update; then
+              rustup default 1.95.0
+              break
+            fi
+            if [[ "${attempt}" == 3 ]]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
 
       - if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
         name: Use hermetic Cargo home (musl)
