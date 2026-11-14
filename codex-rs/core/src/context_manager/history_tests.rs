@@ -2616,7 +2616,8 @@ fn record_items_truncates_custom_tool_call_output_content() {
 
 #[test]
 fn record_items_preserves_code_mode_exec_output_after_exec_budgeting() {
-    let mut history = ContextManager::new();
+    let mut history =
+        ContextManager::new(codex_protocol_test_support::uuid_v7_item_id_generator_for_test());
     let policy = TruncationPolicy::Bytes(1_000);
     let long_output = "x".repeat(50_000);
     let call = ResponseItem::CustomToolCall {
