@@ -232,9 +232,20 @@ jobs:
 
       - name: Build release binaries
         shell: bash
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: |
           set -euo pipefail
           target="${{ matrix.target }}"
+          for attempt in 1 2 3; do
+            if cargo fetch --locked --target "${target}"; then
+              break
+            fi
+            if [[ "${attempt}" == 3 ]]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
           if [[ "${target}" == *"-linux-"* ]]; then
             # Keep the hosted Linux runners under their memory ceiling during late release linking.
             export CARGO_PROFILE_RELEASE_LTO=false
