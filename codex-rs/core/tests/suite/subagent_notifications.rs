@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use assert_matches::assert_matches;
 use codex_agent_graph_store::AgentGraphStore;
@@ -1010,7 +1011,7 @@ async fn subagent_notification_is_included_without_wait() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawned_child_without_fork_uses_child_thread_id_for_session_header() -> Result<()> {
+async fn spawned_child_without_fork_sends_parent_session_and_child_thread_headers() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -1024,14 +1025,16 @@ async fn spawned_child_without_fork_uses_child_thread_id_for_session_header() ->
         })
         .ok_or_else(|| anyhow::anyhow!("expected non-fork child request"))?;
 
-    assert_eq!(
+    let parent_session_id = test.session_configured.session_id.to_string();
+    let header = |name| {
         child_request
             .headers
-            .get("session_id")
-            .and_then(|value| value.to_str().ok()),
-        Some(spawned_id.as_str())
-    );
-    assert_ne!(spawned_id, test.session_configured.session_id.to_string());
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+    };
+    assert_eq!(header("session-id"), Some(parent_session_id.as_str()));
+    assert_eq!(header("thread-id"), Some(spawned_id.as_str()));
+    assert_ne!(spawned_id, parent_session_id);
 
     Ok(())
 }
@@ -1156,7 +1159,7 @@ async fn spawned_child_receives_forked_parent_context(
         )
     );
     assert_eq!(
-        child_request.header("session_id").as_deref(),
+        child_request.header("session-id").as_deref(),
         Some(parent_session_id.as_str())
     );
     let child_thread_id = ThreadId::from_string(
@@ -2158,16 +2161,18 @@ async fn resumed_forked_child_preserves_persisted_parent_wire_session_id() -> Re
         .next()
         .ok_or_else(|| anyhow::anyhow!("expected forked child request"))?;
     assert_eq!(
-        child_request.header("session_id").as_deref(),
+        child_request.header("session-id").as_deref(),
         Some(parent_session_id.as_str())
     );
 
-    let child_rollout_path = test
+    let child_thread = test
         .thread_manager
         .get_thread(ThreadId::from_string(&spawned_id)?)
-        .await?
+        .await?;
+    let child_rollout_path = child_thread
         .rollout_path()
         .ok_or_else(|| anyhow::anyhow!("expected child rollout path"))?;
+    child_thread.shutdown_and_wait().await?;
     let child_session_meta = read_session_meta_line(child_rollout_path.as_path()).await?;
     assert_eq!(
         child_session_meta
@@ -2198,9 +2203,10 @@ async fn resumed_forked_child_preserves_persisted_parent_wire_session_id() -> Re
     let resumed = resume_builder
         .resume(&server, test.home.clone(), child_rollout_path)
         .await?;
+    assert_eq!(resumed.session_configured.thread_id.to_string(), spawned_id);
     assert_eq!(
         resumed.session_configured.session_id.to_string(),
-        spawned_id
+        parent_session_id
     );
 
     resumed.submit_turn(RESUMED_CHILD_PROMPT).await?;
@@ -2210,9 +2216,12 @@ async fn resumed_forked_child_preserves_persisted_parent_wire_session_id() -> Re
         .find(|request| request.body_contains_text(RESUMED_CHILD_PROMPT))
         .ok_or_else(|| anyhow::anyhow!("expected resumed child request"))?;
     assert_eq!(
-        resumed_request.header("session_id").as_deref(),
+        resumed_request.header("session-id").as_deref(),
         Some(parent_session_id.as_str())
     );
+    let extra: serde_json::Value =
+        serde_json::from_str(&resumed_request.header("extra").context("extra header")?)?;
+    assert_eq!(extra, json!({ "session_id": parent_session_id }));
 
     Ok(())
 }

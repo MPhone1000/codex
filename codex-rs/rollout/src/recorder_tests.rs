@@ -1046,10 +1046,12 @@ async fn first_realtime_seal_requires_directory_sync_after_ordinary_writes() -> 
 
     let home = TempDir::new()?;
     let config = test_config(home.path());
+    let thread_id = ThreadId::new();
     let recorder = RolloutRecorder::new(
         &config,
         RolloutRecorderParams::new(
-            ThreadId::new(),
+            thread_id,
+            thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,
             SessionSource::Exec,

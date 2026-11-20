@@ -617,6 +617,7 @@ async fn responses_request_omits_absent_max_output_tokens() -> Result<()> {
     let client = ResponsesClient::new(transport, provider("openai"), Arc::new(NoAuth));
 
     let request = ResponsesApiRequest {
+        request_country: Default::default(),
         model: "gpt-test".into(),
         input: Vec::new(),
         tools: Some(empty_tools().into()),
@@ -724,6 +725,7 @@ async fn streaming_client_retries_on_http_429_when_enabled() -> Result<()> {
     provider.retry.retry_429 = true;
 
     let request = ResponsesApiRequest {
+        request_country: Default::default(),
         model: "gpt-test".into(),
         input: Vec::new(),
         tools: Some(empty_tools().into()),

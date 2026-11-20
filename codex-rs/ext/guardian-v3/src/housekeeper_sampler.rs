@@ -233,6 +233,7 @@ impl HousekeeperSampler {
             ),
             client_metadata: None,
             access_programs: None,
+            max_output_tokens: None,
         }
     }
 

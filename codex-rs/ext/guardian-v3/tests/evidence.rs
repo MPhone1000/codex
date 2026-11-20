@@ -55,6 +55,7 @@ async fn captures_originals_without_generated_context_or_later_appends() -> anyh
             session_id: owner.into(),
             thread_id: owner,
             extra_config: None,
+            wire_session_id: owner,
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,

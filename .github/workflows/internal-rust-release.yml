@@ -123,9 +123,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
           for attempt in 1 2 3; do
-            if rustup toolchain install 1.95.0 --target "${{ matrix.target }}" --profile minimal --component clippy --component rustfmt --component rust-src --no-self-update; then
-              rustup default 1.95.0
+            if rustup toolchain install "$toolchain" --target "${{ matrix.target }}" --profile minimal --component clippy --component rustfmt --component rust-src --no-self-update; then
+              rustup default "$toolchain"
               break
             fi
             if [[ "${attempt}" == 3 ]]; then

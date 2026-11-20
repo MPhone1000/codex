@@ -790,14 +790,6 @@ impl Session {
         }
     }
 
-    pub(crate) async fn wire_session_id(&self) -> ThreadId {
-        let state = self.state.lock().await;
-        state
-            .session_configuration
-            .wire_session_id
-            .unwrap_or(self.thread_id)
-    }
-
     #[instrument(name = "session_init", level = "info", skip_all)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new(
