@@ -385,6 +385,9 @@ jobs:
           cp codex-rs/core/config.schema.json dist/config.schema.json
           cp scripts/install/install.sh dist/install.sh
           cp scripts/install/install.ps1 dist/install.ps1
+          python3 scripts/install/build_ark_model_templates.py \
+            codex-rs/models-manager/models.json dist/ark-model-templates.tar.gz
+          (cd dist && sha256sum ark-model-templates.tar.gz > ark-model-templates.tar.gz.sha256)
 
       - name: Generate release notes
         id: notes
@@ -417,12 +420,13 @@ jobs:
         if: ${{ needs.meta.outputs.publish == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ needs.meta.outputs.version }}-internal
+          name: ${{ needs.meta.outputs.internal_tag == format('internal-{0}', needs.meta.outputs.upstream_tag) && format('{0}-internal', needs.meta.outputs.version) || needs.meta.outputs.internal_tag }}
           tag_name: ${{ needs.meta.outputs.internal_tag }}
           target_commitish: ${{ needs.meta.outputs.release_ref }}
           body_path: ${{ steps.notes.outputs.path }}
           files: dist/**
           prerelease: false
+          make_latest: true
 
       - name: Upload dry-run bundle
         if: ${{ needs.meta.outputs.publish != 'true' }}

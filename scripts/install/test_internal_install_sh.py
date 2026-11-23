@@ -9,14 +9,21 @@ from pathlib import Path
 import subprocess
 import tarfile
 import tempfile
+import tomllib
 from typing import Optional
 import unittest
+
+from build_ark_model_templates import build_templates
 
 
 INSTALL_SCRIPT = Path(__file__).with_name("install.sh")
 VERSION = "0.158.0"
 MAC_TARGET = "aarch64-apple-darwin"
 LINUX_TARGET = "x86_64-unknown-linux-musl"
+ARK_MODEL = "ep-20260101000000-test"
+ARK_MODEL_TEMPLATE = "gpt-6.2-astra"
+ARK_BASE_URL = "https://ark.example.invalid/api/v3"
+ARK_TEST_KEY = "test-ark-key"
 
 
 def write_executable(path: Path, output: str) -> None:
@@ -75,7 +82,12 @@ def create_release(
 
 
 def run_installer(
-    root: Path, target: str, *, version: str = VERSION
+    root: Path,
+    target: str,
+    *,
+    version: str = VERSION,
+    ark: bool = False,
+    extra_env: Optional[dict[str, str]] = None,
 ) -> subprocess.CompletedProcess[str]:
     system = "Linux" if "linux" in target else "Darwin"
     machine = "aarch64" if target.startswith("aarch64") else "x86_64"
@@ -95,12 +107,45 @@ def run_installer(
             "CODEX_INSTALL_AZURE_BASE_URL": "https://example.invalid/openai",
         }
     )
+    args = [version]
+    if ark:
+        args.insert(0, "--ark")
+        env.pop("CODEX_INSTALL_AK")
+        env.pop("CODEX_INSTALL_AZURE_BASE_URL")
+        env.pop("CODEX_INSTALL_ARK_MODEL_TEMPLATE", None)
+        env.update(
+            ARK_API_KEY=ARK_TEST_KEY,
+            CODEX_INSTALL_ARK_MODEL=ARK_MODEL,
+            CODEX_INSTALL_ARK_BASE_URL=ARK_BASE_URL,
+        )
+    env.update(extra_env or {})
     return subprocess.run(
-        ["sh", str(INSTALL_SCRIPT), version],
+        ["sh", str(INSTALL_SCRIPT), *args],
         capture_output=True,
         text=True,
         check=False,
         env=env,
+    )
+
+
+MODELS_PATH = INSTALL_SCRIPT.resolve().parents[2] / "codex-rs/models-manager/models.json"
+
+
+def expected_ark_model(slug: str) -> dict:
+    catalog = json.loads(MODELS_PATH.read_text(encoding="utf-8"))
+    (model,) = (m for m in catalog["models"] if m["slug"] == slug)
+    return {**model, "display_name": slug, "slug": ARK_MODEL}
+
+
+def create_ark_templates(root: Path, *, corrupt_checksum: bool = False) -> None:
+    release = root / "releases" / f"internal-rust-v{VERSION}"
+    asset = release / "ark-model-templates.tar.gz"
+    build_templates(MODELS_PATH, asset)
+    digest = (
+        "0" * 64 if corrupt_checksum else hashlib.sha256(asset.read_bytes()).hexdigest()
+    )
+    asset.with_name(f"{asset.name}.sha256").write_text(
+        f"{digest}  {asset.name}\n", encoding="utf-8"
     )
 
 
@@ -128,6 +173,128 @@ class InternalInstallShTest(unittest.TestCase):
                 subprocess.check_output([old_cli, "--version"], text=True).strip(),
                 f"codex {VERSION}",
             )
+            config = tomllib.loads((root / "codex-home/config.toml").read_text())
+            self.assertEqual(config["model_provider"], "azure")
+            self.assertEqual(
+                config["model_providers"]["azure"]["query_params"]["ak"], "test-key"
+            )
+            self.assertFalse((root / "codex-home/ark.models.json").exists())
+
+    def test_ark_replaces_main_config_and_preserves_previous_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            create_release(root, MAC_TARGET)
+            create_ark_templates(root)
+            codex_home = root / "codex-home"
+            codex_home.mkdir()
+            config_path = codex_home / "config.toml"
+            models_path = codex_home / "ark.models.json"
+            previous_config = 'model_provider = "azure"\n'
+            previous_catalog = '{"models": []}\n'
+            config_path.write_text(previous_config)
+            models_path.write_text(previous_catalog)
+
+            result = run_installer(root, MAC_TARGET, ark=True)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "install-bin/codex").is_symlink())
+            config_text = config_path.read_text()
+            config = tomllib.loads(config_text)
+            self.assertEqual(config["model_provider"], "ark")
+            self.assertEqual(config["model"], ARK_MODEL)
+            self.assertEqual(Path(config["model_catalog_json"]), models_path.resolve())
+            self.assertEqual(config["model_reasoning_effort"], "xhigh")
+            self.assertEqual(config["model_max_output_tokens"], 64000)
+            self.assertTrue(config["shell_environment_policy"]["ignore_default_excludes"])
+            (provider,) = config["model_providers"].values()
+            self.assertEqual(provider["env_key"], "ARK_API_KEY")
+            self.assertEqual(provider["base_url"], ARK_BASE_URL)
+            self.assertEqual(provider["wire_api"], "responses")
+            self.assertFalse(provider["supports_websockets"])
+            self.assertNotIn("query_params", provider)
+            self.assertNotIn(ARK_TEST_KEY, config_text + result.stdout + result.stderr)
+            self.assertFalse((codex_home / "ark.config.toml").exists())
+            self.assertEqual(
+                json.loads(models_path.read_text()),
+                {"models": [expected_ark_model(ARK_MODEL_TEMPLATE)]},
+            )
+            (backup,) = codex_home.glob("ark-install-backup.*")
+            self.assertEqual((backup / config_path.name).read_text(), previous_config)
+            self.assertEqual((backup / models_path.name).read_text(), previous_catalog)
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o700)
+
+    def test_ark_rejects_invalid_inputs_before_installing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for env, message in (
+                ({"ARK_API_KEY": ""}, "Export ARK_API_KEY"),
+                ({"CODEX_INSTALL_ARK_MODEL": "gpt-6.2-astra"}, "endpoint ID"),
+                (
+                    {"CODEX_INSTALL_ARK_BASE_URL": ARK_BASE_URL + "/responses/"},
+                    "without /responses",
+                ),
+            ):
+                with self.subTest(env=env):
+                    result = run_installer(root, MAC_TARGET, ark=True, extra_env=env)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(message, result.stderr)
+                    self.assertFalse((root / "codex-home").exists())
+
+    def test_ark_uses_requested_model_template(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            create_release(root, LINUX_TARGET)
+            create_ark_templates(root)
+            slug = "gpt-6.2-sol"
+
+            result = run_installer(
+                root,
+                LINUX_TARGET,
+                ark=True,
+                extra_env={"CODEX_INSTALL_ARK_MODEL_TEMPLATE": slug},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            catalog = json.loads((root / "codex-home/ark.models.json").read_text())
+            self.assertEqual(catalog, {"models": [expected_ark_model(slug)]})
+
+    def test_ark_unknown_template_does_not_silently_fall_back(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            create_release(root, MAC_TARGET)
+            create_ark_templates(root)
+
+            result = run_installer(
+                root,
+                MAC_TARGET,
+                ark=True,
+                extra_env={"CODEX_INSTALL_ARK_MODEL_TEMPLATE": "not-a-model"},
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Ark model template 'not-a-model' is missing", result.stderr)
+            self.assertFalse((root / "codex-home/config.toml").exists())
+            self.assertFalse((root / "install-bin/codex").exists())
+
+    def test_ark_bad_template_checksum_leaves_existing_install_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            create_release(root, MAC_TARGET)
+            first = run_installer(root, MAC_TARGET)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            config = root / "codex-home/config.toml"
+            original_config = config.read_bytes()
+            cli = root / "install-bin/codex"
+            original_cli = cli.resolve()
+            create_ark_templates(root, corrupt_checksum=True)
+
+            result = run_installer(root, MAC_TARGET, ark=True)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Checksum mismatch for ark-model-templates.tar.gz", result.stderr)
+            self.assertEqual(cli.resolve(), original_cli)
+            self.assertEqual(config.read_bytes(), original_config)
+            self.assertFalse((root / "codex-home/ark.models.json").exists())
 
     def test_linux_package_includes_bwrap(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

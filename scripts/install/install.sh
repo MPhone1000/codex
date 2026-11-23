@@ -2,7 +2,8 @@
 
 set -eu
 
-VERSION="${1:-latest}"
+VERSION="latest"
+INSTALL_PROVIDER="azure"
 REPOSITORY="${CODEX_INSTALL_REPOSITORY:-MPhone1000/codex}"
 RELEASE_TAG_PREFIX="${CODEX_INSTALL_RELEASE_TAG_PREFIX:-internal-rust-v}"
 RELEASE_TAG_OVERRIDE="${CODEX_INSTALL_RELEASE_TAG:-}"
@@ -22,6 +23,44 @@ path_profile=""
 step() {
   printf '==> %s\n' "$1"
 }
+
+usage() {
+  printf '%s\n' 'Usage: install.sh [--ark] [version]' \
+    '  --ark  Configure Ark as the default provider in config.toml.' \
+    '         Requires CODEX_INSTALL_ARK_MODEL, CODEX_INSTALL_ARK_BASE_URL and ARK_API_KEY.' \
+    '         Optional: CODEX_INSTALL_ARK_MODEL_TEMPLATE (default: gpt-6.2-astra).'
+}
+
+parse_install_args() {
+  version_seen=false
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --ark)
+        INSTALL_PROVIDER="ark"
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*)
+        echo "Unknown installer option: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+      *)
+        if [ "$version_seen" = true ]; then
+          usage >&2
+          exit 1
+        fi
+        VERSION="${1:-latest}"
+        version_seen=true
+        ;;
+    esac
+    shift
+  done
+}
+
+parse_install_args "$@"
 
 normalize_version() {
   case "$1" in
@@ -85,6 +124,35 @@ download_text() {
   echo "curl or wget is required to install Codex." >&2
   exit 1
 }
+
+verify_checksum() (
+  file="$1"
+  checksum_file="$2"
+  asset_name="${file##*/}"
+  expected_checksum="$(sed -n '1s/[[:space:]].*$//p' "$checksum_file")"
+  case "$expected_checksum" in
+    *[!0-9a-fA-F]* | "")
+      echo "Invalid checksum for $asset_name." >&2
+      exit 1
+      ;;
+  esac
+  if [ "${#expected_checksum}" -ne 64 ]; then
+    echo "Invalid checksum for $asset_name." >&2
+    exit 1
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual_checksum="$(sha256sum <"$file" | sed 's/[[:space:]].*$//')"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual_checksum="$(shasum -a 256 <"$file" | sed 's/[[:space:]].*$//')"
+  else
+    echo "sha256sum or shasum is required to verify release assets." >&2
+    exit 1
+  fi
+  if [ "$actual_checksum" != "$expected_checksum" ]; then
+    echo "Checksum mismatch for $asset_name." >&2
+    exit 1
+  fi
+)
 
 tag_name_for_version() {
   printf '%s%s\n' "$RELEASE_TAG_PREFIX" "$1"
@@ -354,6 +422,124 @@ toml_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+validate_ark_inputs() {
+  ARK_MODEL="${CODEX_INSTALL_ARK_MODEL:-}"
+  ARK_MODEL_TEMPLATE="${CODEX_INSTALL_ARK_MODEL_TEMPLATE:-gpt-6.2-astra}"
+  ARK_BASE_URL="${CODEX_INSTALL_ARK_BASE_URL:-}"
+  ARK_BASE_URL="${ARK_BASE_URL%/}"
+  case "$ARK_MODEL" in
+    ep- | *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-]*)
+      echo "CODEX_INSTALL_ARK_MODEL must be an Ark endpoint ID (ep-...)." >&2
+      exit 1
+      ;;
+    ep-*) ;;
+    *)
+      echo "CODEX_INSTALL_ARK_MODEL must be an Ark endpoint ID (ep-...)." >&2
+      exit 1
+      ;;
+  esac
+  case "$ARK_MODEL_TEMPLATE" in
+    [!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789]* | *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*)
+      echo "CODEX_INSTALL_ARK_MODEL_TEMPLATE must be a builtin model slug." >&2
+      exit 1
+      ;;
+  esac
+  case "$ARK_BASE_URL" in
+    https:///* | *[[:space:]]* | *\?* | *\#* | *@* | */responses | */responses/*)
+      echo "CODEX_INSTALL_ARK_BASE_URL must be an HTTPS API base URL without /responses, credentials, or a query." >&2
+      exit 1
+      ;;
+    https://?*) ;;
+    *)
+      echo "Set CODEX_INSTALL_ARK_BASE_URL to the Ark HTTPS API base URL ending in /api/v3." >&2
+      exit 1
+      ;;
+  esac
+  if [ -z "${ARK_API_KEY:-}" ]; then
+    echo "Export ARK_API_KEY before installing and running Codex with Ark." >&2
+    exit 1
+  fi
+}
+
+prepare_ark_config() {
+  ark_template_asset="ark-model-templates.tar.gz"
+  ark_template_archive="$tmp_dir/$ark_template_asset"
+  ark_template_checksum="$ark_template_archive.sha256"
+  download_file "$(release_url_for_asset "$ark_template_asset" "$resolved_tag")" "$ark_template_archive"
+  download_file "$(release_url_for_asset "$ark_template_asset.sha256" "$resolved_tag")" "$ark_template_checksum"
+  verify_checksum "$ark_template_archive" "$ark_template_checksum"
+  ark_template="$tmp_dir/ark.model.template.json"
+  if ! tar -xOzf "$ark_template_archive" "ark-models/$ARK_MODEL_TEMPLATE.json" > "$ark_template" ||
+    [ "$(grep -c '^      "slug": "__ARK_ENDPOINT_ID__",$' "$ark_template")" != 1 ]; then
+    echo "Ark model template '$ARK_MODEL_TEMPLATE' is missing or invalid in release $resolved_tag." >&2
+    exit 1
+  fi
+
+  config_home="$(cd "$INSTALL_CODEX_HOME" && pwd -P)"
+  ark_config_path="$config_home/config.toml"
+  ark_models_path="$config_home/ark.models.json"
+  for config_target in "$ark_config_path" "$ark_models_path"; do
+    if { [ -e "$config_target" ] || [ -L "$config_target" ]; } && [ ! -f "$config_target" ]; then
+      echo "Cannot replace $config_target: expected a regular file." >&2
+      exit 1
+    fi
+  done
+  ark_config_stage="$(mktemp -d "$config_home/.ark-install.XXXXXX")"
+  (
+    umask 077
+    sed "s/^      \"slug\": \"__ARK_ENDPOINT_ID__\",\$/      \"slug\": \"$ARK_MODEL\",/" \
+      "$ark_template" > "$ark_config_stage/ark.models.json"
+    cat > "$ark_config_stage/config.toml" <<EOF
+model = "$ARK_MODEL"
+model_provider = "ark"
+model_catalog_json = "$(toml_escape "$ark_models_path")"
+model_reasoning_effort = "xhigh"
+model_max_output_tokens = 64000
+
+[shell_environment_policy]
+ignore_default_excludes = true
+
+[model_providers.ark]
+name = "Ark"
+base_url = "$(toml_escape "$ARK_BASE_URL")"
+wire_api = "responses"
+env_key = "ARK_API_KEY"
+supports_websockets = false
+requires_openai_auth = false
+request_max_retries = 50
+retry_429 = true
+stream_max_retries = 50
+EOF
+  )
+  ark_backup_dir=""
+  if [ -f "$ark_config_path" ] || [ -f "$ark_models_path" ]; then
+    ark_backup_dir="$(mktemp -d "$config_home/ark-install-backup.XXXXXX")"
+    (
+      umask 077
+      for config_target in "$ark_config_path" "$ark_models_path"; do
+        if [ -f "$config_target" ]; then
+          cp "$config_target" "$ark_backup_dir/"
+        fi
+      done
+    )
+    step "Backed up existing configuration to $ark_backup_dir"
+  fi
+}
+
+activate_ark_config() {
+  mv -f "$ark_config_stage/ark.models.json" "$ark_models_path"
+  if ! mv -f "$ark_config_stage/config.toml" "$ark_config_path"; then
+    if [ -n "$ark_backup_dir" ] && [ -f "$ark_backup_dir/ark.models.json" ]; then
+      cp "$ark_backup_dir/ark.models.json" "$ark_config_stage/ark.models.json"
+      mv -f "$ark_config_stage/ark.models.json" "$ark_models_path"
+    else
+      rm -f "$ark_models_path"
+    fi
+    return 1
+  fi
+  step "Configured Ark in config.toml. Keep ARK_API_KEY exported when running codex."
+}
+
 write_base_config_defaults() {
   mkdir -p "$INSTALL_CODEX_HOME"
   config_path="$INSTALL_CODEX_HOME/config.toml"
@@ -460,6 +646,9 @@ else
 fi
 
 INSTALL_DIR="$(resolve_install_dir)"
+if [ "$INSTALL_PROVIDER" = "ark" ]; then
+  validate_ark_inputs
+fi
 if [ -x "$INSTALL_DIR/codex" ]; then
   install_mode="Updating"
 else
@@ -487,6 +676,7 @@ step "Resolved version: $resolved_version"
 tmp_dir="$(mktemp -d)"
 staged_release_dir=""
 link_dir=""
+ark_config_stage=""
 cleanup() {
   rm -rf "$tmp_dir"
   if [ -n "$staged_release_dir" ]; then
@@ -494,6 +684,9 @@ cleanup() {
   fi
   if [ -n "$link_dir" ]; then
     rm -rf "$link_dir"
+  fi
+  if [ -n "$ark_config_stage" ]; then
+    rm -rf "$ark_config_stage"
   fi
 }
 trap cleanup EXIT INT TERM
@@ -505,29 +698,7 @@ step "Downloading Codex CLI package"
 download_file "$package_download_url" "$package_archive_path"
 download_file "$checksum_download_url" "$checksum_path"
 
-expected_checksum="$(sed -n '1s/[[:space:]].*$//p' "$checksum_path")"
-case "$expected_checksum" in
-  *[!0-9a-fA-F]* | "")
-    echo "Invalid checksum for $package_asset." >&2
-    exit 1
-    ;;
-esac
-if [ "${#expected_checksum}" -ne 64 ]; then
-  echo "Invalid checksum for $package_asset." >&2
-  exit 1
-fi
-if command -v sha256sum >/dev/null 2>&1; then
-  actual_checksum="$(sha256sum "$package_archive_path" | sed 's/[[:space:]].*$//')"
-elif command -v shasum >/dev/null 2>&1; then
-  actual_checksum="$(shasum -a 256 "$package_archive_path" | sed 's/[[:space:]].*$//')"
-else
-  echo "sha256sum or shasum is required to verify the Codex package." >&2
-  exit 1
-fi
-if [ "$actual_checksum" != "$expected_checksum" ]; then
-  echo "Checksum mismatch for $package_asset." >&2
-  exit 1
-fi
+verify_checksum "$package_archive_path" "$checksum_path"
 
 # Keep fork packages outside the upstream standalone update channel.
 releases_dir="$INSTALL_CODEX_HOME/packages/internal/releases"
@@ -556,23 +727,31 @@ if [ "$os" = "linux" ] && [ ! -x "$staged_release_dir/codex-resources/bwrap" ]; 
 fi
 "$staged_release_dir/bin/codex" --version >/dev/null
 
-prompt_for_install_config
-
-step "Configuring config.toml"
-write_install_config
-
-step "Installing to $INSTALL_DIR"
-mkdir -p "$INSTALL_DIR"
 if [ -d "$INSTALL_DIR/codex" ]; then
   echo "$INSTALL_DIR/codex is a directory; cannot replace it with the CLI entrypoint." >&2
   exit 1
 fi
+if [ "$INSTALL_PROVIDER" = "ark" ]; then
+  step "Preparing Ark configuration"
+  prepare_ark_config
+else
+  prompt_for_install_config
+  step "Configuring config.toml"
+  write_install_config
+fi
+
+step "Installing to $INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
 link_dir="$(mktemp -d "$INSTALL_DIR/.codex-install.XXXXXX")"
 ln -s "$staged_release_dir/bin/codex" "$link_dir/codex"
 mv -f "$link_dir/codex" "$INSTALL_DIR/codex"
 staged_release_dir=""
 rmdir "$link_dir"
 link_dir=""
+
+if [ "$INSTALL_PROVIDER" = "ark" ]; then
+  activate_ark_config
+fi
 
 add_to_path
 

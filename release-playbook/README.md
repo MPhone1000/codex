@@ -126,6 +126,7 @@ gh release view internal-rust-vX.Y.Z --repo MPhone1000/codex
 - 发布存在，且具有预期的标签/版本
 - 发布说明包含上游标签和补丁栈
 - 发布资产包含内部二进制文件、`config.schema.json`、`install.sh`、`install.ps1`以及`rg`捆绑包
+- 支持 Ark 的发布还包含从同版本内置模型目录生成的 `ark-model-templates.tar.gz` 及其 `.sha256` 校验文件
 - macOS/Linux 完整包为 `codex-package-<target>.tar.gz`，同时提供 `.sha256` 校验文件；包内包含 manifest、CLI、code-mode host、`rg`，Linux 还包含 `bwrap`
 - 完整包通过 daemon 启动检查后才能发布；自定义安装脚本将包安装到 `packages/internal/releases`，保留内部安装标识
 
@@ -136,3 +137,18 @@ gh release view internal-rust-vX.Y.Z --repo MPhone1000/codex
 如果后续的补丁移植有误，请修复候选分支并使用新的内部标签再次运行工作流调度。
 
 本操作手册中不需要`queue/internal`、`queue/base/internal`或`main`提升步骤。
+
+## 9. 安装时选择 Ark（macOS / Linux）
+
+```bash
+export CODEX_INSTALL_ARK_MODEL="ep-<your-endpoint-id>"
+export CODEX_INSTALL_ARK_BASE_URL="https://<your-ark-host>/api/v3"
+# 可选：选择一个当前版本支持的内置模型模板，默认 gpt-6.2-astra
+# export CODEX_INSTALL_ARK_MODEL_TEMPLATE="gpt-6.2-sol"
+# 从密钥管理工具加载并 export ARK_API_KEY
+curl -fsSL https://github.com/MPhone1000/codex/releases/latest/download/install.sh \
+  | bash -s -- --ark
+codex exec "Hello" --skip-git-repo-check
+```
+
+可以在 `--ark` 后传入包含 Ark 支持的版本或完整内部标签。不传 `--ark` 时仍使用原来的 Azure 安装方式。Ark 模式备份已有的 `config.toml` 和 `ark.models.json` 到 Codex 配置目录下的 `ark-install-backup.*`，再安装新配置。直接运行 `codex` 即可使用 Ark；`/model` 显示所选模板名，请求发送到 `CODEX_INSTALL_ARK_MODEL` 指定的 endpoint。密钥不会写入配置，运行 Codex 的 shell 需要继续导出 `ARK_API_KEY`。
