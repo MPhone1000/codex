@@ -10,9 +10,6 @@ import sys
 import tarfile
 
 
-DEFAULT_TEMPLATE = "gpt-6.2-astra"
-
-
 def build_templates(catalog_path: Path, archive_path: Path) -> None:
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     templates = {}
@@ -29,8 +26,8 @@ def build_templates(catalog_path: Path, archive_path: Path) -> None:
             json.dumps({"models": [template]}, indent=2, ensure_ascii=False) + "\n"
         ).encode("utf-8")
 
-    if DEFAULT_TEMPLATE not in templates:
-        raise ValueError(f"Missing default Ark model template: {DEFAULT_TEMPLATE}")
+    if not templates:
+        raise ValueError("No selectable builtin models for Ark")
 
     with tarfile.open(archive_path, "w:gz") as archive:
         for slug, payload in sorted(templates.items()):

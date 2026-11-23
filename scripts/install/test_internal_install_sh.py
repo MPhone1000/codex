@@ -194,7 +194,12 @@ class InternalInstallShTest(unittest.TestCase):
             config_path.write_text(previous_config)
             models_path.write_text(previous_catalog)
 
-            result = run_installer(root, MAC_TARGET, ark=True)
+            result = run_installer(
+                root,
+                MAC_TARGET,
+                ark=True,
+                extra_env={"CODEX_INSTALL_ARK_MODEL_TEMPLATE": ARK_MODEL_TEMPLATE},
+            )
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / "install-bin/codex").is_symlink())
@@ -239,6 +244,34 @@ class InternalInstallShTest(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(message, result.stderr)
                     self.assertFalse((root / "codex-home").exists())
+
+    def test_ark_without_template_does_not_download_or_configure_a_catalog(self) -> None:
+        for existing_catalog in [False, True]:
+            with self.subTest(existing_catalog=existing_catalog):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    root = Path(temp_dir)
+                    create_release(root, MAC_TARGET)
+                    codex_home = root / "codex-home"
+                    codex_home.mkdir()
+                    config_path = codex_home / "config.toml"
+                    models_path = codex_home / "ark.models.json"
+                    config_path.write_text('model_provider = "azure"\n')
+                    if existing_catalog:
+                        models_path.write_text('{"models": []}\n')
+
+                    result = run_installer(root, MAC_TARGET, ark=True)
+
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    config = tomllib.loads(config_path.read_text())
+                    self.assertEqual(config["model_provider"], "ark")
+                    self.assertEqual(config["model"], ARK_MODEL)
+                    self.assertNotIn("model_catalog_json", config)
+                    (backup,) = codex_home.glob("ark-install-backup.*")
+                    self.assertTrue((backup / "config.toml").is_file())
+                    self.assertFalse((backup / "ark.models.json").exists())
+                    self.assertEqual(models_path.exists(), existing_catalog)
+                    if existing_catalog:
+                        self.assertEqual(models_path.read_text(), '{"models": []}\n')
 
     def test_ark_uses_requested_model_template(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -288,7 +321,12 @@ class InternalInstallShTest(unittest.TestCase):
             original_cli = cli.resolve()
             create_ark_templates(root, corrupt_checksum=True)
 
-            result = run_installer(root, MAC_TARGET, ark=True)
+            result = run_installer(
+                root,
+                MAC_TARGET,
+                ark=True,
+                extra_env={"CODEX_INSTALL_ARK_MODEL_TEMPLATE": ARK_MODEL_TEMPLATE},
+            )
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Checksum mismatch for ark-model-templates.tar.gz", result.stderr)

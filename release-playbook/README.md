@@ -143,12 +143,12 @@ gh release view internal-rust-vX.Y.Z --repo MPhone1000/codex
 ```bash
 export CODEX_INSTALL_ARK_MODEL="ep-<your-endpoint-id>"
 export CODEX_INSTALL_ARK_BASE_URL="https://<your-ark-host>/api/v3"
-# 可选：选择一个当前版本支持的内置模型模板，默认 gpt-6.2-astra
-# export CODEX_INSTALL_ARK_MODEL_TEMPLATE="gpt-6.2-sol"
+# 可选：选择一个当前版本支持的内置模型模板
+# export CODEX_INSTALL_ARK_MODEL_TEMPLATE="gpt-6.2-astra"
 # 从密钥管理工具加载并 export ARK_API_KEY
 curl -fsSL https://github.com/MPhone1000/codex/releases/latest/download/install.sh \
   | bash -s -- --ark
 codex exec "Hello" --skip-git-repo-check
 ```
 
-可以在 `--ark` 后传入包含 Ark 支持的版本或完整内部标签。不传 `--ark` 时仍使用原来的 Azure 安装方式。Ark 模式备份已有的 `config.toml` 和 `ark.models.json` 到 Codex 配置目录下的 `ark-install-backup.*`，再安装新配置。直接运行 `codex` 即可使用 Ark；`/model` 显示所选模板名，请求发送到 `CODEX_INSTALL_ARK_MODEL` 指定的 endpoint。密钥不会写入配置，运行 Codex 的 shell 需要继续导出 `ARK_API_KEY`。
+可以在 `--ark` 后传入包含 Ark 支持的版本或完整内部标签。不传 `--ark` 时仍使用原来的 Azure 安装方式。Ark 模式备份已有的 `config.toml` 到 Codex 配置目录下的 `ark-install-backup.*`，再替换主配置。仅在设置 `CODEX_INSTALL_ARK_MODEL_TEMPLATE` 时才生成并引用 `ark.models.json`，同时备份已有的同名文件；此时 `/model` 显示所选模板名。无论是否选模板，直接运行 `codex` 都会使用 `CODEX_INSTALL_ARK_MODEL` 指定的 Ark endpoint。密钥不会写入配置，运行 Codex 的 shell 需要继续导出 `ARK_API_KEY`。

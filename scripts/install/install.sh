@@ -28,7 +28,7 @@ usage() {
   printf '%s\n' 'Usage: install.sh [--ark] [version]' \
     '  --ark  Configure Ark as the default provider in config.toml.' \
     '         Requires CODEX_INSTALL_ARK_MODEL, CODEX_INSTALL_ARK_BASE_URL and ARK_API_KEY.' \
-    '         Optional: CODEX_INSTALL_ARK_MODEL_TEMPLATE (default: gpt-6.2-astra).'
+    '         Set CODEX_INSTALL_ARK_MODEL_TEMPLATE to install an optional model catalog.'
 }
 
 parse_install_args() {
@@ -424,7 +424,7 @@ toml_escape() {
 
 validate_ark_inputs() {
   ARK_MODEL="${CODEX_INSTALL_ARK_MODEL:-}"
-  ARK_MODEL_TEMPLATE="${CODEX_INSTALL_ARK_MODEL_TEMPLATE:-gpt-6.2-astra}"
+  ARK_MODEL_TEMPLATE="${CODEX_INSTALL_ARK_MODEL_TEMPLATE:-}"
   ARK_BASE_URL="${CODEX_INSTALL_ARK_BASE_URL:-}"
   ARK_BASE_URL="${ARK_BASE_URL%/}"
   case "$ARK_MODEL" in
@@ -461,7 +461,7 @@ validate_ark_inputs() {
   fi
 }
 
-prepare_ark_config() {
+prepare_ark_model_catalog() {
   ark_template_asset="ark-model-templates.tar.gz"
   ark_template_archive="$tmp_dir/$ark_template_asset"
   ark_template_checksum="$ark_template_archive.sha256"
@@ -474,25 +474,39 @@ prepare_ark_config() {
     echo "Ark model template '$ARK_MODEL_TEMPLATE' is missing or invalid in release $resolved_tag." >&2
     exit 1
   fi
+  (
+    umask 077
+    sed "s/^      \"slug\": \"__ARK_ENDPOINT_ID__\",\$/      \"slug\": \"$ARK_MODEL\",/" \
+      "$ark_template" > "$ark_config_stage/ark.models.json"
+  )
+}
 
+prepare_ark_config() {
   config_home="$(cd "$INSTALL_CODEX_HOME" && pwd -P)"
   ark_config_path="$config_home/config.toml"
   ark_models_path="$config_home/ark.models.json"
-  for config_target in "$ark_config_path" "$ark_models_path"; do
+  set -- "$ark_config_path"
+  if [ -n "$ARK_MODEL_TEMPLATE" ]; then
+    set -- "$@" "$ark_models_path"
+  fi
+  for config_target in "$@"; do
     if { [ -e "$config_target" ] || [ -L "$config_target" ]; } && [ ! -f "$config_target" ]; then
       echo "Cannot replace $config_target: expected a regular file." >&2
       exit 1
     fi
   done
   ark_config_stage="$(mktemp -d "$config_home/.ark-install.XXXXXX")"
+  catalog_setting=""
+  if [ -n "$ARK_MODEL_TEMPLATE" ]; then
+    prepare_ark_model_catalog
+    catalog_setting="model_catalog_json = \"$(toml_escape "$ark_models_path")\""
+  fi
   (
     umask 077
-    sed "s/^      \"slug\": \"__ARK_ENDPOINT_ID__\",\$/      \"slug\": \"$ARK_MODEL\",/" \
-      "$ark_template" > "$ark_config_stage/ark.models.json"
     cat > "$ark_config_stage/config.toml" <<EOF
 model = "$ARK_MODEL"
 model_provider = "ark"
-model_catalog_json = "$(toml_escape "$ark_models_path")"
+$catalog_setting
 model_reasoning_effort = "xhigh"
 model_max_output_tokens = 64000
 
@@ -512,28 +526,31 @@ stream_max_retries = 50
 EOF
   )
   ark_backup_dir=""
-  if [ -f "$ark_config_path" ] || [ -f "$ark_models_path" ]; then
-    ark_backup_dir="$(mktemp -d "$config_home/ark-install-backup.XXXXXX")"
-    (
-      umask 077
-      for config_target in "$ark_config_path" "$ark_models_path"; do
-        if [ -f "$config_target" ]; then
-          cp "$config_target" "$ark_backup_dir/"
-        fi
-      done
-    )
+  for config_target in "$@"; do
+    if [ -f "$config_target" ]; then
+      if [ -z "$ark_backup_dir" ]; then
+        ark_backup_dir="$(mktemp -d "$config_home/ark-install-backup.XXXXXX")"
+      fi
+      (umask 077; cp "$config_target" "$ark_backup_dir/")
+    fi
+  done
+  if [ -n "$ark_backup_dir" ]; then
     step "Backed up existing configuration to $ark_backup_dir"
   fi
 }
 
 activate_ark_config() {
-  mv -f "$ark_config_stage/ark.models.json" "$ark_models_path"
+  if [ -n "$ARK_MODEL_TEMPLATE" ]; then
+    mv -f "$ark_config_stage/ark.models.json" "$ark_models_path"
+  fi
   if ! mv -f "$ark_config_stage/config.toml" "$ark_config_path"; then
-    if [ -n "$ark_backup_dir" ] && [ -f "$ark_backup_dir/ark.models.json" ]; then
-      cp "$ark_backup_dir/ark.models.json" "$ark_config_stage/ark.models.json"
-      mv -f "$ark_config_stage/ark.models.json" "$ark_models_path"
-    else
-      rm -f "$ark_models_path"
+    if [ -n "$ARK_MODEL_TEMPLATE" ]; then
+      if [ -n "$ark_backup_dir" ] && [ -f "$ark_backup_dir/ark.models.json" ]; then
+        (umask 077; cp "$ark_backup_dir/ark.models.json" "$ark_config_stage/ark.models.json")
+        mv -f "$ark_config_stage/ark.models.json" "$ark_models_path"
+      else
+        rm -f "$ark_models_path"
+      fi
     fi
     return 1
   fi
