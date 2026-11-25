@@ -3420,6 +3420,10 @@
           "description": "Does this provider require an OpenAI API key or ChatGPT login token? If true, the user is presented with a login screen on first run, and credentials are stored using the backend selected by `cli_auth_credentials_store`. If false (the default), the login screen is skipped, and the API key (if needed) comes from the environment variable specified by `env_key`.",
           "type": "boolean"
         },
+        "retry_429": {
+          "description": "Whether HTTP 429 responses should be retried at the request layer.",
+          "type": "boolean"
+        },
         "stream_idle_timeout_ms": {
           "description": "Idle timeout (in milliseconds) to wait for activity on a streaming response before treating the connection as lost.",
           "format": "uint64",
@@ -3465,7 +3469,7 @@
       "properties": {
         "default_wait_timeout_ms": {
           "format": "int64",
-          "maximum": 3600000.0,
+          "maximum": 14400000.0,
           "minimum": 0.0,
           "type": "integer"
         },
@@ -3498,7 +3502,7 @@
         },
         "max_wait_timeout_ms": {
           "format": "int64",
-          "maximum": 3600000.0,
+          "maximum": 14400000.0,
           "minimum": 0.0,
           "type": "integer"
         },
@@ -3516,7 +3520,7 @@
         },
         "min_wait_timeout_ms": {
           "format": "int64",
-          "maximum": 3600000.0,
+          "maximum": 14400000.0,
           "minimum": 0.0,
           "type": "integer"
         },
@@ -9120,6 +9124,11 @@
         }
       ],
       "description": "Optional path to a file containing model instructions that will override the built-in instructions for the selected model. Users are STRONGLY DISCOURAGED from using this field, as deviating from the instructions sanctioned by Codex will likely degrade model performance."
+    },
+    "model_max_output_tokens": {
+      "description": "Optional override of the maximum output tokens to request from the model.",
+      "format": "int64",
+      "type": "integer"
     },
     "model_post_turn_compact_threshold_percent": {
       "description": "Percentage of the usable context window that triggers compaction after a final response. Existing auto-compaction limits still apply. Omitted or zero disables turn-end compaction; valid values are 0–100.",

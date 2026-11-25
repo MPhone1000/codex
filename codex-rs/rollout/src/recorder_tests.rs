@@ -221,6 +221,7 @@ async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
             creator_account_id: None,
             session_id: thread_id.into(),
             id: thread_id,
+            wire_session_id: None,
             forked_from_id: None,
             forked_from_ordinal_exclusive: None,
             parent_thread_id: None,
@@ -651,6 +652,7 @@ async fn recorder_preserves_additional_tools_in_both_history_modes() -> std::io:
             &config,
             RolloutRecorderParams::new(
                 thread_id,
+                thread_id,
                 /*forked_from_id*/ None,
                 /*parent_thread_id*/ None,
                 SessionSource::Exec,
@@ -703,6 +705,7 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
     let recorder = RolloutRecorder::new(
         &config,
         RolloutRecorderParams::new(
+            thread_id,
             thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,
@@ -808,10 +811,12 @@ async fn referenced_paginated_rollout_starts_at_history_cutoff_and_resumes() -> 
         end_ordinal_exclusive: 41,
         end_byte_offset: 1,
     };
+    let thread_id = ThreadId::new();
     let recorder = RolloutRecorder::new(
         &config,
         RolloutRecorderParams::new(
-            ThreadId::new(),
+            thread_id,
+            thread_id,
             Some(history_base.thread_id),
             /*parent_thread_id*/ None,
             SessionSource::Exec,
@@ -880,6 +885,7 @@ async fn rollout_id_preserves_session_meta_thread_id() -> std::io::Result<()> {
         &config,
         RolloutRecorderParams::new(
             thread_id,
+            thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,
             SessionSource::Exec,
@@ -918,10 +924,12 @@ async fn rollout_id_preserves_session_meta_thread_id() -> std::io::Result<()> {
 async fn recorder_omits_ordinals_from_legacy_rollouts() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
+    let thread_id = ThreadId::new();
     let recorder = RolloutRecorder::new(
         &config,
         RolloutRecorderParams::new(
-            ThreadId::new(),
+            thread_id,
+            thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,
             SessionSource::Exec,
@@ -980,6 +988,7 @@ async fn persist_reports_filesystem_error_and_retries_buffered_items() -> std::i
         &config,
         RolloutRecorderParams::new(
             thread_id,
+            thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,
             SessionSource::Exec,
@@ -1037,10 +1046,12 @@ async fn first_realtime_seal_requires_directory_sync_after_ordinary_writes() -> 
 
     let home = TempDir::new()?;
     let config = test_config(home.path());
+    let thread_id = ThreadId::new();
     let recorder = RolloutRecorder::new(
         &config,
         RolloutRecorderParams::new(
-            ThreadId::new(),
+            thread_id,
+            thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,
             SessionSource::Exec,
@@ -1153,6 +1164,7 @@ async fn resumed_paginated_rollout_continues_after_decimal_token_count() -> std:
     let recorder = RolloutRecorder::new(
         &config,
         RolloutRecorderParams::new(
+            thread_id,
             thread_id,
             /*forked_from_id*/ None,
             /*parent_thread_id*/ None,

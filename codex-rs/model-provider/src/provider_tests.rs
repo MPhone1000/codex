@@ -75,6 +75,7 @@ fn provider_for(base_url: String) -> ModelProviderInfo {
         http_headers: None,
         env_http_headers: None,
         request_max_retries: Some(0),
+        retry_429: None,
         stream_max_retries: Some(0),
         stream_idle_timeout_ms: Some(5_000),
         websocket_connect_timeout_ms: None,
@@ -168,7 +169,7 @@ fn configured_provider_remote_compaction_matches_provider_support() {
                 base_url: Some("https://example.com/openai".to_string()),
                 ..ModelProviderInfo::default()
             },
-            RemoteCompactionSupport::V2,
+            RemoteCompactionSupport::Unsupported,
         ),
         (
             ModelProviderInfo {
@@ -176,7 +177,7 @@ fn configured_provider_remote_compaction_matches_provider_support() {
                 base_url: Some("https://example.openai.azure.com/openai/v1".to_string()),
                 ..ModelProviderInfo::default()
             },
-            RemoteCompactionSupport::V2,
+            RemoteCompactionSupport::Unsupported,
         ),
         (
             provider_for("https://example.test/v1".to_string()),

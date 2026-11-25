@@ -279,7 +279,7 @@ pub(crate) const AGENTS_MD_MAX_BYTES: usize = DEFAULT_PROJECT_DOC_MAX_BYTES; // 
 pub(crate) const DEFAULT_AGENT_MAX_THREADS: Option<usize> = Some(6);
 pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_CONCURRENT_THREADS_PER_SESSION: usize = 4;
 pub(crate) const DEFAULT_MULTI_AGENT_V2_MIN_WAIT_TIMEOUT_MS: i64 = 10_000;
-pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_WAIT_TIMEOUT_MS: i64 = 3600 * 1000;
+pub(crate) const DEFAULT_MULTI_AGENT_V2_MAX_WAIT_TIMEOUT_MS: i64 = 4 * 3600 * 1000;
 pub(crate) const DEFAULT_MULTI_AGENT_V2_DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
 const DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE: &str = "collaboration";
 
@@ -321,12 +321,12 @@ fn resolve_mcp_oauth_credentials_store_mode(
     configured: OAuthCredentialsStoreMode,
     package_version: &str,
 ) -> OAuthCredentialsStoreMode {
-    match (package_version, configured) {
-        (
-            LOCAL_DEV_BUILD_VERSION,
-            OAuthCredentialsStoreMode::Keyring | OAuthCredentialsStoreMode::Auto,
-        ) => OAuthCredentialsStoreMode::File,
-        (_, mode) => mode,
+    match configured {
+        OAuthCredentialsStoreMode::Auto => OAuthCredentialsStoreMode::File,
+        OAuthCredentialsStoreMode::Keyring if package_version == LOCAL_DEV_BUILD_VERSION => {
+            OAuthCredentialsStoreMode::File
+        }
+        mode => mode,
     }
 }
 
@@ -684,6 +684,9 @@ pub struct Config {
 
     /// Percentage of the model's full context window at which background compaction starts.
     pub async_compaction_threshold_percent: u8,
+
+    /// Optional override of the maximum output tokens to request from the model.
+    pub model_max_output_tokens: Option<i64>,
 
     /// Key into the model_providers map that specifies which provider to use.
     pub model_provider_id: String,
@@ -4748,6 +4751,7 @@ impl Config {
                 .model_post_turn_compact_threshold_percent
                 .unwrap_or_default(),
             async_compaction_threshold_percent,
+            model_max_output_tokens: cfg.model_max_output_tokens,
             model_provider_id,
             model_provider,
             cwd: resolved_cwd,

@@ -718,13 +718,29 @@ impl ContextManager {
         if !is_api_message(item, metadata) {
             return None;
         }
+        let preserve_code_mode_exec_output = match item {
+            ResponseItem::CustomToolCallOutput { call_id, .. } => {
+                self.items.iter().rev().any(|item| {
+                    matches!(
+                        &item.item,
+                        ResponseItem::CustomToolCall {
+                            call_id: custom_call_id,
+                            name,
+                            ..
+                        } if custom_call_id == call_id && name == "exec"
+                    )
+                })
+            }
+            _ => false,
+        };
         let mut processed = ResponseItemEnvelope {
             item: item.clone(),
             metadata: metadata.cloned(),
         };
         self.sampling.record(&mut processed);
-        if let ResponseItem::FunctionCallOutput { output, .. }
-        | ResponseItem::CustomToolCallOutput { output, .. } = &mut processed.item
+        if !preserve_code_mode_exec_output
+            && let ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. } = &mut processed.item
             && !metadata.is_some_and(|metadata| metadata.tool_audio_budget_applied)
         {
             // The override already includes the tool's serialization allowance.

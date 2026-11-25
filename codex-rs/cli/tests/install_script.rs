@@ -1,0 +1,1032 @@
+#![cfg(not(windows))]
+
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+
+use anyhow::Context;
+use anyhow::Result;
+use pretty_assertions::assert_eq;
+use sha2::Digest;
+use sha2::Sha256;
+use tempfile::TempDir;
+use toml::Value as TomlValue;
+
+const INSTALL_VERSION: &str = "9.9.9";
+const INSTALL_TAG: &str = "internal-rust-v9.9.9";
+const INSTALL_AK: &str = "install-ak";
+const INSTALL_AZURE_BASE_URL: &str = "https://internal.example.test/openapi";
+
+struct PlatformFixture<'a> {
+    uname_s: &'a str,
+    uname_m: &'a str,
+    proc_translated: Option<&'a str>,
+    vendor_target: &'a str,
+    platform_label: &'a str,
+}
+
+fn make_executable(path: &Path) -> Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+fn repo_root() -> Result<PathBuf> {
+    Ok(codex_utils_cargo_bin::repo_root()?)
+}
+
+fn installer_script_path() -> Result<PathBuf> {
+    Ok(repo_root()?.join("scripts/install/install.sh"))
+}
+
+fn codex_binary_path() -> Result<PathBuf> {
+    Ok(codex_utils_cargo_bin::cargo_bin("codex")?)
+}
+
+fn base_test_path() -> String {
+    "/usr/bin:/bin:/usr/sbin:/sbin".to_string()
+}
+
+fn sanitize_installer_env(command: &mut Command) {
+    for (key, _) in std::env::vars().filter(|(key, _)| key.starts_with("CODEX_INSTALL_")) {
+        command.env_remove(key);
+    }
+    command.env_remove("CODEX_HOME");
+}
+
+fn create_release_fixture_with_codex(
+    root: &Path,
+    platform: &PlatformFixture<'_>,
+    codex_source: &Path,
+    release_tag: &str,
+) -> Result<String> {
+    let release_dir = root.join("releases").join("download").join(release_tag);
+    fs::create_dir_all(&release_dir)?;
+    fs::write(
+        release_dir.join("install.sh"),
+        "# release installer marker\n",
+    )?;
+
+    let native_stage = TempDir::new_in(root)?;
+    let native_asset_name = format!("codex-package-{}.tar.gz", platform.vendor_target);
+    fs::create_dir_all(native_stage.path().join("bin"))?;
+    fs::create_dir_all(native_stage.path().join("codex-resources"))?;
+    fs::create_dir_all(native_stage.path().join("codex-path"))?;
+    let native_binary_path = native_stage.path().join("bin/codex");
+    fs::copy(codex_source, &native_binary_path)?;
+    make_executable(&native_binary_path)?;
+    let code_mode_host_path = native_stage.path().join("bin/codex-code-mode-host");
+    fs::write(
+        &code_mode_host_path,
+        "#!/bin/sh\necho code mode host smoke test\n",
+    )?;
+    make_executable(&code_mode_host_path)?;
+    let rg_path = native_stage.path().join("codex-path/rg");
+    fs::write(&rg_path, "#!/bin/sh\necho rg smoke test\n")?;
+    make_executable(&rg_path)?;
+    if platform.uname_s == "Linux" {
+        let bwrap_path = native_stage.path().join("codex-resources/bwrap");
+        fs::write(&bwrap_path, "#!/bin/sh\necho bwrap smoke test\n")?;
+        make_executable(&bwrap_path)?;
+    }
+    fs::write(
+        native_stage.path().join("codex-package.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "layoutVersion": 1,
+            "version": INSTALL_VERSION,
+            "target": platform.vendor_target,
+            "variant": "codex",
+            "entrypoint": "bin/codex",
+            "resourcesDir": "codex-resources",
+            "pathDir": "codex-path",
+        }))?,
+    )?;
+    run_command(
+        Command::new("tar")
+            .arg("-C")
+            .arg(native_stage.path())
+            .arg("-czf")
+            .arg(release_dir.join(&native_asset_name))
+            .arg("."),
+    )?;
+    let digest = Sha256::digest(fs::read(release_dir.join(&native_asset_name))?);
+    fs::write(
+        release_dir.join(format!("{native_asset_name}.sha256")),
+        format!("{digest:x}  {native_asset_name}\n"),
+    )?;
+
+    Ok(format!(
+        "file://{}",
+        root.join("releases").join("download").display()
+    ))
+}
+
+fn create_release_fixture(root: &Path, platform: &PlatformFixture<'_>) -> Result<String> {
+    let codex_path = codex_binary_path()?;
+    create_release_fixture_with_codex(root, platform, &codex_path, INSTALL_TAG)
+}
+
+fn installed_package_path(install_dir: &Path) -> Result<PathBuf> {
+    let entrypoint = install_dir.join("codex").canonicalize()?;
+    entrypoint
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .context("installed CLI must be inside the package bin directory")
+}
+
+fn run_command(command: &mut Command) -> Result<()> {
+    let output = command.output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "command failed: status={:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn run_installer(
+    home: &Path,
+    release_base_url: &str,
+    platform: &PlatformFixture<'_>,
+    extra_path_prefix: Option<&Path>,
+) -> Result<String> {
+    run_installer_with_model(
+        home,
+        release_base_url,
+        platform,
+        extra_path_prefix,
+        /*install_model*/ None,
+    )
+}
+
+fn run_installer_with_model(
+    home: &Path,
+    release_base_url: &str,
+    platform: &PlatformFixture<'_>,
+    extra_path_prefix: Option<&Path>,
+    install_model: Option<&str>,
+) -> Result<String> {
+    run_installer_with_shell(
+        home,
+        release_base_url,
+        platform,
+        extra_path_prefix,
+        "/bin/sh",
+        install_model,
+    )
+}
+
+fn run_installer_with_shell(
+    home: &Path,
+    release_base_url: &str,
+    platform: &PlatformFixture<'_>,
+    extra_path_prefix: Option<&Path>,
+    shell: &str,
+    install_model: Option<&str>,
+) -> Result<String> {
+    let mut path = base_test_path();
+    if let Some(prefix) = extra_path_prefix {
+        path = format!("{}:{path}", prefix.display());
+    }
+
+    let mut command = Command::new("sh");
+    sanitize_installer_env(&mut command);
+    command
+        .arg(installer_script_path()?)
+        .arg(INSTALL_VERSION)
+        .env("HOME", home)
+        .env("SHELL", shell)
+        .env("CODEX_INSTALL_AK", INSTALL_AK)
+        .env("CODEX_INSTALL_AZURE_BASE_URL", INSTALL_AZURE_BASE_URL)
+        .env("CODEX_INSTALL_RELEASE_BASE_URL", release_base_url)
+        .env("CODEX_INSTALL_UNAME_S", platform.uname_s)
+        .env("CODEX_INSTALL_UNAME_M", platform.uname_m)
+        .env("PATH", path);
+    if let Some(install_model) = install_model {
+        command.env("CODEX_INSTALL_MODEL", install_model);
+    }
+    if let Some(proc_translated) = platform.proc_translated {
+        command.env("CODEX_INSTALL_PROC_TRANSLATED", proc_translated);
+    }
+
+    let output = command.output()?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "installer failed: status={:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+fn run_installer_with_release_tag(
+    home: &Path,
+    release_base_url: &str,
+    platform: &PlatformFixture<'_>,
+    release_tag: &str,
+) -> Result<String> {
+    let mut command = Command::new("sh");
+    sanitize_installer_env(&mut command);
+    let output = command
+        .arg(installer_script_path()?)
+        .arg("latest")
+        .env("HOME", home)
+        .env("SHELL", "/bin/sh")
+        .env("CODEX_INSTALL_AK", INSTALL_AK)
+        .env("CODEX_INSTALL_AZURE_BASE_URL", INSTALL_AZURE_BASE_URL)
+        .env("CODEX_INSTALL_RELEASE_BASE_URL", release_base_url)
+        .env("CODEX_INSTALL_RELEASE_TAG", release_tag)
+        .env("CODEX_INSTALL_UNAME_S", platform.uname_s)
+        .env("CODEX_INSTALL_UNAME_M", platform.uname_m)
+        .env("PATH", base_test_path())
+        .output()?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "installer failed: status={:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+fn run_installer_latest(
+    home: &Path,
+    release_base_url: &str,
+    latest_install_url: &str,
+    latest_release_url: &str,
+    platform: &PlatformFixture<'_>,
+    extra_path_prefix: Option<&Path>,
+) -> Result<String> {
+    let mut path = base_test_path();
+    if let Some(prefix) = extra_path_prefix {
+        path = format!("{}:{path}", prefix.display());
+    }
+
+    let mut command = Command::new("sh");
+    sanitize_installer_env(&mut command);
+    let output = command
+        .arg(installer_script_path()?)
+        .env("HOME", home)
+        .env("SHELL", "/bin/sh")
+        .env("CODEX_INSTALL_AK", INSTALL_AK)
+        .env("CODEX_INSTALL_AZURE_BASE_URL", INSTALL_AZURE_BASE_URL)
+        .env("CODEX_INSTALL_RELEASE_BASE_URL", release_base_url)
+        .env("CODEX_INSTALL_LATEST_INSTALL_URL", latest_install_url)
+        .env("CODEX_INSTALL_LATEST_RELEASE_URL", latest_release_url)
+        .env("CODEX_INSTALL_UNAME_S", platform.uname_s)
+        .env("CODEX_INSTALL_UNAME_M", platform.uname_m)
+        .env("PATH", path)
+        .output()?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "installer failed: status={:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+fn run_installer_failure(
+    home: &Path,
+    release_base_url: &str,
+    platform: &PlatformFixture<'_>,
+) -> Result<(String, String)> {
+    let mut command = Command::new("sh");
+    sanitize_installer_env(&mut command);
+    let output = command
+        .arg(installer_script_path()?)
+        .arg(INSTALL_VERSION)
+        .env("HOME", home)
+        .env("SHELL", "/bin/sh")
+        .env("CODEX_INSTALL_AK", INSTALL_AK)
+        .env("CODEX_INSTALL_AZURE_BASE_URL", INSTALL_AZURE_BASE_URL)
+        .env("CODEX_INSTALL_RELEASE_BASE_URL", release_base_url)
+        .env("CODEX_INSTALL_UNAME_S", platform.uname_s)
+        .env("CODEX_INSTALL_UNAME_M", platform.uname_m)
+        .env("PATH", base_test_path())
+        .output()?;
+
+    if output.status.success() {
+        anyhow::bail!(
+            "installer unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok((
+        String::from_utf8(output.stdout)?,
+        String::from_utf8(output.stderr)?,
+    ))
+}
+
+fn read_installed_config(home: &Path) -> Result<TomlValue> {
+    read_installed_config_file(home, "config.toml")
+}
+
+fn read_installed_config_file(home: &Path, file_name: &str) -> Result<TomlValue> {
+    let config_path = home.join(".codex").join(file_name);
+    let serialized = fs::read_to_string(&config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    Ok(toml::from_str(&serialized)?)
+}
+
+fn value_at_path<'a>(value: &'a TomlValue, segments: &[&str]) -> Option<&'a TomlValue> {
+    let mut current = value;
+    for segment in segments {
+        let table = current.as_table()?;
+        current = table.get(*segment)?;
+    }
+    Some(current)
+}
+
+fn assert_installed_binary_loads_default_config(home: &Path, install_dir: &Path) -> Result<()> {
+    let output = Command::new(install_dir.join("codex"))
+        .arg("debug")
+        .arg("prompt-input")
+        .arg("smoke")
+        .env("HOME", home)
+        .env("CODEX_HOME", home.join(".codex"))
+        .env(
+            "PATH",
+            format!("{}:{}", install_dir.display(), base_test_path()),
+        )
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "installed codex failed to load default config: status={:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn install_script_selects_linux_x86_64_musl_asset_and_bootstraps_config() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+
+    let stdout = run_installer(
+        home.path(),
+        &release_base_url,
+        &platform,
+        /*extra_path_prefix*/ None,
+    )?;
+    assert!(stdout.contains(platform.platform_label));
+    assert!(
+        stdout.contains("Configured config.toml. Run `codex` to use the internal Azure provider.")
+    );
+    assert!(stdout.contains("Run now: export PATH="));
+    assert!(stdout.contains("&& codex\n"));
+
+    let install_dir = home.path().join(".local").join("bin");
+    assert!(install_dir.join("codex").is_file());
+    assert!(
+        installed_package_path(&install_dir)?
+            .join("codex-path/rg")
+            .is_file()
+    );
+    assert!(home.path().join(".profile").is_file());
+
+    let config = read_installed_config(home.path())?;
+    assert_eq!(
+        value_at_path(&config, &["profile"]).and_then(TomlValue::as_str),
+        None
+    );
+    assert_eq!(
+        value_at_path(&config, &["model"]).and_then(TomlValue::as_str),
+        Some("gpt-5.4-2026-03-05")
+    );
+    assert_eq!(
+        value_at_path(&config, &["model_provider"]).and_then(TomlValue::as_str),
+        Some("azure")
+    );
+    assert_eq!(
+        value_at_path(&config, &["model_providers", "azure", "base_url"])
+            .and_then(TomlValue::as_str),
+        Some(INSTALL_AZURE_BASE_URL)
+    );
+    assert_eq!(
+        value_at_path(&config, &["model_providers", "azure", "query_params", "ak"])
+            .and_then(TomlValue::as_str),
+        Some(INSTALL_AK)
+    );
+    assert_eq!(
+        value_at_path(&config, &["features", "multi_agent"]).and_then(TomlValue::as_bool),
+        None
+    );
+    assert_eq!(
+        value_at_path(&config, &["agents", "max_concurrent_threads_per_session"])
+            .and_then(TomlValue::as_integer),
+        Some(8)
+    );
+    assert_eq!(
+        value_at_path(&config, &["tui", "notification_condition"]),
+        None
+    );
+    assert_eq!(value_at_path(&config, &["tui", "status_line"]), None);
+    assert!(
+        !home
+            .path()
+            .join(".codex")
+            .join("internal.config.toml")
+            .exists()
+    );
+    assert!(!home.path().join(".codex").join("aidp.config.toml").exists());
+
+    assert_installed_binary_loads_default_config(home.path(), &install_dir)?;
+    Ok(())
+}
+
+#[test]
+fn install_script_resolves_latest_version_from_install_url_when_api_lookup_fails() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+    let latest_install_url = format!(
+        "file://{}/{INSTALL_TAG}/install.sh",
+        fixtures.path().join("releases").join("download").display()
+    );
+
+    let stdout = run_installer_latest(
+        home.path(),
+        &release_base_url,
+        &latest_install_url,
+        "file:///definitely-missing/latest.json",
+        &platform,
+        /*extra_path_prefix*/ None,
+    )?;
+
+    assert!(stdout.contains("Resolved version: 9.9.9"));
+    assert!(
+        home.path()
+            .join(".local")
+            .join("bin")
+            .join("codex")
+            .is_file()
+    );
+    assert!(
+        installed_package_path(&home.path().join(".local/bin"))?
+            .join("bin/codex-code-mode-host")
+            .is_file()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn install_script_resolves_latest_version_from_redirect_location_header() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let tools = TempDir::new()?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+    let curl_output = Command::new("sh")
+        .arg("-c")
+        .arg("command -v curl")
+        .output()?;
+    let real_curl = String::from_utf8(curl_output.stdout)?;
+    let real_curl = real_curl.trim();
+    let fake_latest_url = "https://example.invalid/latest/install.sh";
+    let fake_curl = tools.path().join("curl");
+    fs::write(
+        &fake_curl,
+        format!(
+            "#!/bin/sh\nset -eu\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nif [ \"$last\" = \"{fake_latest_url}\" ]; then\n  printf 'HTTP/2 302\\r\\n'\n  printf 'location: https://github.com/MPhone1000/codex/releases/download/{INSTALL_TAG}/install.sh\\r\\n\\r\\n'\n  exit 0\nfi\nexec {real_curl} \"$@\"\n"
+        ),
+    )?;
+    make_executable(&fake_curl)?;
+
+    let stdout = run_installer_latest(
+        home.path(),
+        &release_base_url,
+        fake_latest_url,
+        "file:///definitely-missing/latest.json",
+        &platform,
+        Some(tools.path()),
+    )?;
+
+    assert!(stdout.contains("Resolved version: 9.9.9"));
+    assert!(
+        home.path()
+            .join(".local")
+            .join("bin")
+            .join("codex")
+            .is_file()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn install_script_supports_explicit_internal_release_tag_override() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let internal_release_tag = "internal-hotfix-9.9.9";
+    let codex_path = codex_binary_path()?;
+    let release_base_url = create_release_fixture_with_codex(
+        fixtures.path(),
+        &platform,
+        &codex_path,
+        internal_release_tag,
+    )?;
+
+    let stdout = run_installer_with_release_tag(
+        home.path(),
+        &release_base_url,
+        &platform,
+        internal_release_tag,
+    )?;
+
+    assert!(stdout.contains("Resolved version: internal-hotfix-9.9.9"));
+    assert!(
+        home.path()
+            .join(".local")
+            .join("bin")
+            .join("codex")
+            .is_file()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn install_script_rejects_linux_arm64_when_release_is_not_published() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "aarch64",
+        proc_translated: None,
+        vendor_target: "aarch64-unknown-linux-musl",
+        platform_label: "Linux (ARM64)",
+    };
+    let home = TempDir::new()?;
+    let (stdout, stderr) = run_installer_failure(home.path(), "file:///unused", &platform)?;
+
+    assert_eq!(stdout, "");
+    assert!(stderr.contains("Linux (ARM64) is not currently published"));
+
+    Ok(())
+}
+
+#[test]
+fn install_script_prefers_darwin_arm64_asset_under_rosetta() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Darwin",
+        uname_m: "x86_64",
+        proc_translated: Some("1"),
+        vendor_target: "aarch64-apple-darwin",
+        platform_label: "macOS (Apple Silicon)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+
+    let stdout = run_installer(
+        home.path(),
+        &release_base_url,
+        &platform,
+        /*extra_path_prefix*/ None,
+    )?;
+    assert!(stdout.contains(platform.platform_label));
+    assert!(
+        home.path()
+            .join(".local")
+            .join("bin")
+            .join("codex")
+            .is_file()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn install_script_reuses_existing_codex_install_dir() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let existing_bin = home.path().join("existing-bin");
+    fs::create_dir_all(&existing_bin)?;
+    fs::write(existing_bin.join("codex"), "#!/bin/sh\necho stale codex\n")?;
+    make_executable(&existing_bin.join("codex"))?;
+
+    let fake_codex_path = fixtures.path().join("fake-codex");
+    fs::write(&fake_codex_path, "#!/bin/sh\nexit 0\n")?;
+    make_executable(&fake_codex_path)?;
+    let release_base_url = create_release_fixture_with_codex(
+        fixtures.path(),
+        &platform,
+        &fake_codex_path,
+        INSTALL_TAG,
+    )?;
+    let stdout = run_installer(
+        home.path(),
+        &release_base_url,
+        &platform,
+        Some(existing_bin.as_path()),
+    )?;
+
+    assert!(stdout.contains(&format!("Installing to {}", existing_bin.display())));
+    assert!(existing_bin.join("codex").is_file());
+    assert!(
+        !home
+            .path()
+            .join(".local")
+            .join("bin")
+            .join("codex")
+            .exists()
+    );
+    assert!(!home.path().join(".profile").exists());
+
+    Ok(())
+}
+
+#[test]
+fn install_script_falls_back_when_zshrc_is_not_writable() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Darwin",
+        uname_m: "aarch64",
+        proc_translated: None,
+        vendor_target: "aarch64-apple-darwin",
+        platform_label: "macOS (Apple Silicon)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+    let zshrc_path = home.path().join(".zshrc");
+    fs::write(&zshrc_path, "# managed elsewhere\n")?;
+    let mut permissions = fs::metadata(&zshrc_path)?.permissions();
+    permissions.set_mode(0o400);
+    fs::set_permissions(&zshrc_path, permissions)?;
+
+    let stdout = run_installer_with_shell(
+        home.path(),
+        &release_base_url,
+        &platform,
+        /*extra_path_prefix*/ None,
+        "/bin/zsh",
+        /*install_model*/ None,
+    )?;
+
+    let zprofile_path = home.path().join(".zprofile");
+    assert!(stdout.contains(&format!(
+        "PATH updated for future shells in {}",
+        zprofile_path.display()
+    )));
+    assert!(zprofile_path.is_file());
+    assert!(fs::read_to_string(&zprofile_path)?.contains("export PATH=\""));
+
+    Ok(())
+}
+
+#[test]
+fn install_script_honors_codex_install_model_override() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+
+    run_installer_with_model(
+        home.path(),
+        &release_base_url,
+        &platform,
+        /*extra_path_prefix*/ None,
+        Some("gpt-5.4"),
+    )?;
+
+    let config = read_installed_config(home.path())?;
+    assert_eq!(
+        value_at_path(&config, &["model"]).and_then(TomlValue::as_str),
+        Some("gpt-5.4")
+    );
+    assert!(
+        !home
+            .path()
+            .join(".codex")
+            .join("internal.config.toml")
+            .exists()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn install_script_requires_noninteractive_install_config() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+
+    let mut command = Command::new("sh");
+    sanitize_installer_env(&mut command);
+    let output = command
+        .arg(installer_script_path()?)
+        .arg(INSTALL_VERSION)
+        .env("HOME", home.path())
+        .env("SHELL", "/bin/sh")
+        .env("CODEX_INSTALL_RELEASE_BASE_URL", &release_base_url)
+        .env("CODEX_INSTALL_UNAME_S", platform.uname_s)
+        .env("CODEX_INSTALL_UNAME_M", platform.uname_m)
+        .env("PATH", base_test_path())
+        .output()?;
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(
+        stderr.contains("Non-interactive installs must set both CODEX_INSTALL_AK")
+            || stderr.contains("A non-empty Azure base URL and ak are required"),
+        "unexpected stderr:\n{stderr}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn install_script_leaves_existing_aidp_profile_untouched() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let codex_home = home.path().join(".codex");
+    fs::create_dir_all(&codex_home)?;
+    fs::write(
+        codex_home.join("aidp.config.toml"),
+        r#"
+model = "existing-model"
+
+[model_providers.azure]
+base_url = "https://existing.example.test/openapi"
+
+[model_providers.azure.query_params]
+ak = "existing-ak"
+"#,
+    )?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+
+    let mut command = Command::new("sh");
+    sanitize_installer_env(&mut command);
+    let output = command
+        .arg(installer_script_path()?)
+        .arg(INSTALL_VERSION)
+        .env("HOME", home.path())
+        .env("SHELL", "/bin/sh")
+        .env("CODEX_INSTALL_AK", "new-ak")
+        .env(
+            "CODEX_INSTALL_AZURE_BASE_URL",
+            "https://new.example.test/openapi",
+        )
+        .env("CODEX_INSTALL_RELEASE_BASE_URL", &release_base_url)
+        .env("CODEX_INSTALL_UNAME_S", platform.uname_s)
+        .env("CODEX_INSTALL_UNAME_M", platform.uname_m)
+        .env("PATH", base_test_path())
+        .output()?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "installer failed: status={:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        stdout.contains("Configured config.toml. Run `codex` to use the internal Azure provider.")
+    );
+    assert!(!stdout.contains("aidp"));
+
+    let config = read_installed_config(home.path())?;
+    assert_eq!(
+        value_at_path(&config, &["model"]).and_then(TomlValue::as_str),
+        Some("gpt-5.4-2026-03-05")
+    );
+    assert_eq!(
+        value_at_path(&config, &["model_providers", "azure", "base_url"])
+            .and_then(TomlValue::as_str),
+        Some("https://new.example.test/openapi")
+    );
+    assert_eq!(
+        value_at_path(&config, &["model_providers", "azure", "query_params", "ak"])
+            .and_then(TomlValue::as_str),
+        Some("new-ak")
+    );
+    let aidp_config = read_installed_config_file(home.path(), "aidp.config.toml")?;
+    assert_eq!(
+        value_at_path(&aidp_config, &["model"]).and_then(TomlValue::as_str),
+        Some("existing-model")
+    );
+    assert_eq!(
+        value_at_path(&aidp_config, &["model_providers", "azure", "base_url"])
+            .and_then(TomlValue::as_str),
+        Some("https://existing.example.test/openapi")
+    );
+    assert_eq!(
+        value_at_path(
+            &aidp_config,
+            &["model_providers", "azure", "query_params", "ak"]
+        )
+        .and_then(TomlValue::as_str),
+        Some("existing-ak")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn install_script_warns_for_crawl_base_url_but_continues() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+    let release_base_url = create_release_fixture(fixtures.path(), &platform)?;
+    let crawl_url = "https://example.test/gpt/openapi/v2/crawl";
+
+    let mut command = Command::new("sh");
+    sanitize_installer_env(&mut command);
+    let output = command
+        .arg(installer_script_path()?)
+        .arg(INSTALL_VERSION)
+        .env("HOME", home.path())
+        .env("SHELL", "/bin/sh")
+        .env("CODEX_INSTALL_AK", "new-ak")
+        .env("CODEX_INSTALL_AZURE_BASE_URL", crawl_url)
+        .env("CODEX_INSTALL_RELEASE_BASE_URL", &release_base_url)
+        .env("CODEX_INSTALL_UNAME_S", platform.uname_s)
+        .env("CODEX_INSTALL_UNAME_M", platform.uname_m)
+        .env("PATH", base_test_path())
+        .output()?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "installer failed: status={:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains("CODEX_INSTALL_AZURE_BASE_URL ends with /v2/crawl"));
+
+    let config = read_installed_config(home.path())?;
+    assert_eq!(
+        value_at_path(&config, &["model_providers", "azure", "base_url"])
+            .and_then(TomlValue::as_str),
+        Some(crawl_url)
+    );
+    assert_eq!(
+        value_at_path(&config, &["model_providers", "azure", "query_params", "ak"])
+            .and_then(TomlValue::as_str),
+        Some("new-ak")
+    );
+
+    Ok(())
+}
+
+#[test]
+fn install_script_does_not_run_installed_codex_to_write_config() -> Result<()> {
+    let platform = PlatformFixture {
+        uname_s: "Linux",
+        uname_m: "x86_64",
+        proc_translated: None,
+        vendor_target: "x86_64-unknown-linux-musl",
+        platform_label: "Linux (x64)",
+    };
+    let fixtures = TempDir::new()?;
+    let home = TempDir::new()?;
+
+    let fake_codex_dir = TempDir::new_in(fixtures.path())?;
+    let fake_codex_path = fake_codex_dir.path().join("codex");
+    fs::write(
+        &fake_codex_path,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nexit 137\n",
+    )?;
+    make_executable(&fake_codex_path)?;
+
+    let release_base_url = create_release_fixture_with_codex(
+        fixtures.path(),
+        &platform,
+        &fake_codex_path,
+        INSTALL_TAG,
+    )?;
+
+    let mut command = Command::new("sh");
+    sanitize_installer_env(&mut command);
+    let output = command
+        .arg(installer_script_path()?)
+        .arg(INSTALL_VERSION)
+        .env("HOME", home.path())
+        .env("SHELL", "/bin/sh")
+        .env("CODEX_INSTALL_AK", INSTALL_AK)
+        .env("CODEX_INSTALL_AZURE_BASE_URL", INSTALL_AZURE_BASE_URL)
+        .env("CODEX_INSTALL_RELEASE_BASE_URL", &release_base_url)
+        .env("CODEX_INSTALL_UNAME_S", platform.uname_s)
+        .env("CODEX_INSTALL_UNAME_M", platform.uname_m)
+        .env("PATH", base_test_path())
+        .output()?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "installer failed: status={:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(stdout.contains("Configuring config.toml"));
+
+    let install_dir = home.path().join(".local").join("bin");
+    assert!(install_dir.join("codex").is_file());
+    assert!(
+        installed_package_path(&install_dir)?
+            .join("codex-path/rg")
+            .is_file()
+    );
+    let config = read_installed_config(home.path())?;
+    assert_eq!(
+        value_at_path(&config, &["model_provider"]).and_then(TomlValue::as_str),
+        Some("azure")
+    );
+
+    Ok(())
+}

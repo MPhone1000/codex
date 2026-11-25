@@ -165,6 +165,7 @@ pub(crate) struct SessionConfiguration {
     pub(super) thread_name: Option<String>,
     /// Thread-owned plugin selection inherited by future turns.
     pub(super) disabled_plugin_ids: Vec<String>,
+    pub(super) wire_session_id: Option<ThreadId>,
 
     // TODO(pakrym): Remove config from here
     pub(super) original_config_do_not_use: Arc<Config>,
@@ -1081,6 +1082,8 @@ impl Session {
         let prevent_root_enrollment = thread_extension_init
             .remove::<crate::agent::helper_daybreak::PreventRootEnrollment>()
             .is_some();
+        let wire_session_id = session_configuration.wire_session_id.unwrap_or(thread_id);
+        session_configuration.wire_session_id = Some(wire_session_id);
         let mcp_thread_init = thread_extension_init.clone();
         let thread_extension_data = codex_extension_api::ExtensionData::new_with_init(
             thread_id.to_string(),
@@ -1141,6 +1144,7 @@ impl Session {
                             session_id,
                             thread_id,
                             extra_config: config.extra_config.clone(),
+                            wire_session_id,
                             forked_from_id,
                             parent_thread_id,
                             source: session_source,
@@ -1880,6 +1884,7 @@ impl Session {
                 config.model_verbosity,
                 config.features.enabled(Feature::ContentItemKinds),
                 reasoning_effort_override_enabled,
+                config.model_max_output_tokens,
                 config.features.enabled(Feature::EnableRequestCompression),
                 config.features.enabled(Feature::RuntimeMetrics),
                 Self::build_model_client_beta_features_header(config.as_ref()),

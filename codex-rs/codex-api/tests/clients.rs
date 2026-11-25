@@ -292,6 +292,69 @@ data: {"id":"resp-1","output":[{"type":"message","role":"assistant","content":[{
     }
 }
 
+#[derive(Clone)]
+struct Flaky429Transport {
+    state: Arc<Mutex<i64>>,
+}
+
+impl Default for Flaky429Transport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Flaky429Transport {
+    fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    fn attempts(&self) -> i64 {
+        *self
+            .state
+            .lock()
+            .unwrap_or_else(|err| panic!("mutex poisoned: {err}"))
+    }
+}
+
+impl HttpTransport for Flaky429Transport {
+    async fn execute(&self, _req: Request) -> Result<Response, TransportError> {
+        Err(TransportError::Build("execute should not run".to_string()))
+    }
+
+    async fn stream(&self, _req: Request) -> Result<StreamResponse, TransportError> {
+        let mut attempts = self
+            .state
+            .lock()
+            .unwrap_or_else(|err| panic!("mutex poisoned: {err}"));
+        *attempts += 1;
+
+        if *attempts == 1 {
+            return Err(TransportError::Http {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                url: None,
+                headers: None,
+                body: Some("rate limit".to_string()),
+                retry_after: None,
+            });
+        }
+
+        let stream = futures::stream::iter(vec![Ok(Bytes::from(
+            r#"event: message
+data: {"id":"resp-429","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}
+
+"#,
+        ))]);
+
+        Ok(StreamResponse {
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+            bytes: Box::pin(stream),
+        })
+    }
+}
+
 #[tokio::test]
 async fn responses_client_uses_responses_path() -> Result<()> {
     let state = RecordingState::default();
@@ -370,6 +433,7 @@ async fn responses_client_stream_request_preserves_item_ids() -> Result<()> {
         text: None,
         client_metadata: None,
         access_programs: None,
+        max_output_tokens: None,
     };
     let expected = serde_json::to_value(&request)?;
 
@@ -428,6 +492,7 @@ async fn responses_client_stream_request_sends_routing_fields_ahead_of_large_inp
         text: None,
         client_metadata: None,
         access_programs: None,
+        max_output_tokens: None,
     };
     let expected = serde_json::to_value(&request)?;
 
@@ -514,6 +579,7 @@ fn sampling_request(input: Vec<ResponseItem>) -> ResponsesApiRequest {
         text: None,
         client_metadata: None,
         access_programs: None,
+        max_output_tokens: None,
     }
 }
 
@@ -634,6 +700,51 @@ async fn streaming_client_retries_on_transport_error() -> Result<()> {
 }
 
 #[tokio::test]
+async fn responses_request_omits_absent_max_output_tokens() -> Result<()> {
+    let state = RecordingState::default();
+    let transport = RecordingTransport::new(state.clone());
+    let client = ResponsesClient::new(transport, provider("openai"), Arc::new(NoAuth));
+
+    let request = ResponsesApiRequest {
+        request_country: Default::default(),
+        model: "gpt-test".into(),
+        input: Vec::new(),
+        tools: Some(empty_tools().into()),
+        tool_choice: "auto".into(),
+        parallel_tool_calls: false,
+        reasoning: None,
+        store: false,
+        stream: true,
+        stream_options: None,
+        include: Vec::new(),
+        service_tier: None,
+        prompt_cache_key: None,
+        prompt_cache_options: None,
+        text: None,
+        client_metadata: None,
+        access_programs: None,
+        max_output_tokens: None,
+    };
+
+    let _stream = client
+        .stream_request(
+            request,
+            ResponsesOptions {
+                compression: Compression::None,
+                ..Default::default()
+            },
+        )
+        .await?;
+
+    let requests = state.take_stream_requests();
+    assert_eq!(requests.len(), 1);
+    let body: serde_json::Value = serde_json::from_slice(request_body_bytes(&requests[0]))?;
+    assert_eq!(body.get("max_output_tokens"), None);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn streaming_client_retries_on_transient_auth_error() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
@@ -695,6 +806,49 @@ async fn streaming_client_does_not_retry_terminal_auth_errors() {
 }
 
 #[tokio::test]
+async fn streaming_client_retries_on_http_429_when_enabled() -> Result<()> {
+    let transport = Flaky429Transport::new();
+
+    let mut provider = provider("openai");
+    provider.retry.max_attempts = 2;
+    provider.retry.retry_429 = true;
+
+    let request = ResponsesApiRequest {
+        request_country: Default::default(),
+        model: "gpt-test".into(),
+        input: Vec::new(),
+        tools: Some(empty_tools().into()),
+        tool_choice: "auto".into(),
+        parallel_tool_calls: false,
+        reasoning: None,
+        store: false,
+        stream: true,
+        stream_options: None,
+        include: Vec::new(),
+        service_tier: None,
+        prompt_cache_key: None,
+        prompt_cache_options: None,
+        text: None,
+        client_metadata: None,
+        access_programs: None,
+        max_output_tokens: None,
+    };
+    let client = ResponsesClient::new(transport.clone(), provider, Arc::new(NoAuth));
+
+    let _stream = client
+        .stream_request(
+            request,
+            ResponsesOptions {
+                compression: Compression::None,
+                ..Default::default()
+            },
+        )
+        .await?;
+    assert_eq!(transport.attempts(), 2);
+    Ok(())
+}
+
+#[tokio::test]
 async fn azure_store_sends_ids_and_headers() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
@@ -726,6 +880,7 @@ async fn azure_store_sends_ids_and_headers() -> Result<()> {
         text: None,
         client_metadata: None,
         access_programs: None,
+        max_output_tokens: None,
     };
 
     let mut extra_headers = HeaderMap::new();
@@ -734,7 +889,7 @@ async fn azure_store_sends_ids_and_headers() -> Result<()> {
         .stream_request(
             request,
             ResponsesOptions {
-                session_id: Some("sess_123".into()),
+                session_id: Some("parent_wire_456".into()),
                 thread_id: Some("thread_123".into()),
                 session_source: Some(SessionSource::SubAgent(SubAgentSource::Review)),
                 extra_headers,
@@ -751,7 +906,7 @@ async fn azure_store_sends_ids_and_headers() -> Result<()> {
 
     assert_eq!(
         req.headers.get("session-id").and_then(|v| v.to_str().ok()),
-        Some("sess_123")
+        Some("parent_wire_456")
     );
     assert_eq!(
         req.headers.get("thread-id").and_then(|v| v.to_str().ok()),

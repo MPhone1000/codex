@@ -171,6 +171,24 @@ async fn responses_request_enforces_independent_speed_requirements(
     Ok(())
 }
 
+#[tokio::test]
+async fn configured_max_output_tokens_reaches_responses_request() -> anyhow::Result<()> {
+    let server = start_mock_server().await;
+    let response = mount_sse_once(&server, sse(vec![ev_completed("response")])).await;
+    let test = test_codex()
+        .with_config(|config| config.model_max_output_tokens = Some(64_000))
+        .build_with_auto_env(&server)
+        .await?;
+
+    test.submit_text_turn("hello").await?;
+
+    assert_eq!(
+        response.single_request().body_json()["max_output_tokens"],
+        json!(64_000)
+    );
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_request_preserves_flex_without_catalog_support_or_fast_mode()
 -> anyhow::Result<()> {
@@ -1925,6 +1943,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         http_headers: None,
         env_http_headers: None,
         request_max_retries: Some(0),
+        retry_429: None,
         stream_max_retries: Some(0),
         stream_idle_timeout_ms: Some(5_000),
         websocket_connect_timeout_ms: None,
@@ -1983,6 +2002,7 @@ async fn send_request_with_provider(provider: ModelProviderInfo) {
         config.model_verbosity,
         config.features.enabled(Feature::ContentItemKinds),
         config.features.enabled(Feature::ReasoningEffortOverride),
+        /*model_max_output_tokens*/ None,
         /*enable_request_compression*/ false,
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
@@ -3635,6 +3655,7 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
         http_headers: None,
         env_http_headers: None,
         request_max_retries: Some(0),
+        retry_429: None,
         stream_max_retries: Some(0),
         stream_idle_timeout_ms: Some(5_000),
         websocket_connect_timeout_ms: None,
@@ -3685,6 +3706,7 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
         config.model_verbosity,
         config.features.enabled(Feature::ContentItemKinds),
         config.features.enabled(Feature::ReasoningEffortOverride),
+        /*model_max_output_tokens*/ None,
         /*enable_request_compression*/ false,
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
@@ -4487,6 +4509,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         )])),
         env_http_headers: None,
         request_max_retries: None,
+        retry_429: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
@@ -4578,6 +4601,7 @@ async fn env_var_overrides_loaded_auth() {
         )])),
         env_http_headers: None,
         request_max_retries: None,
+        retry_429: None,
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,

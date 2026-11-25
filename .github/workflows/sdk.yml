@@ -40,18 +40,8 @@ jobs:
             '
 
   sdks:
-    permissions:
-      contents: read
-      id-token: write
-    # Keep the Bazel CLI build advisory until the public build and cache rollout is verified.
-    continue-on-error: true
-    runs-on:
-      group: ${{ github.event.repository.name }}-runners
-      labels: ${{ github.event.repository.name }}-linux-x64
-    timeout-minutes: 90
-    environment:
-      name: bazel
-      deployment: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -96,7 +86,7 @@ jobs:
             --remote-download-toplevel \
             -- \
             build \
-            --build_metadata=COMMIT_SHA=${GITHUB_SHA} \
+            "--build_metadata=COMMIT_SHA=${GITHUB_SHA}" \
             --build_metadata=TAG_job=sdk \
             -- \
             //codex-rs/cli:codex \

@@ -691,6 +691,7 @@ mod thread_processor_behavior_tests {
             http_headers: None,
             env_http_headers: None,
             request_max_retries: None,
+            retry_429: None,
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
@@ -1041,6 +1042,7 @@ mod thread_processor_behavior_tests {
         let session_meta = SessionMeta {
             session_id: conversation_id.into(),
             id: conversation_id,
+            wire_session_id: Some(conversation_id),
             timestamp: timestamp.clone(),
             model_provider: None,
             ..SessionMeta::default()
@@ -1099,6 +1101,7 @@ mod thread_processor_behavior_tests {
         let session_meta = SessionMeta {
             session_id: parent_thread_id.into(),
             id: conversation_id,
+            wire_session_id: Some(conversation_id),
             timestamp: timestamp.clone(),
             source: SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id,
